@@ -7,7 +7,7 @@ from pricing_data import get_repair_price, is_repair_item, get_replacement_price
 from product_identification import identify_luggage
 from cache_manager import CacheManager
 
-AUTH_HEADER = "Basic QVBJUjowMDAx"
+AUTH_HEADER = ""
 DOCUMENTS_URL = "https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema/DOCUMENTS_D"
 LOGFILE_URL = "https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema/LOGFILE"
 
