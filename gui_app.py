@@ -10,6 +10,7 @@ from fetch_combined import fetch_with_cache, combine_data, TARGET_CUSTOMERS
 from pricing_data import *
 from product_identification import LUGGAGE_IDENTIFICATION
 from inventory_analysis import filter_by_attributes
+from forecast_tab import ForecastTab
 import pandas as pd
 
 class ReportGeneratorTab(QWidget):
@@ -1305,6 +1306,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(InventoryTab(), "מעקב מלאי")
         tabs.addTab(InventoryAnalysisTab(), "תחקור התנהלות מלאי")
         tabs.addTab(UnidentifiedProductsTab(), "זיהוי מוצרים")
+        tabs.addTab(ForecastTab(), "תחזיות")
         tabs.addTab(UpdatesTab(), "עדכונים")
 
         footer = QLabel("נכתב על ידי ירון גנד עבור תמוז סחר")
