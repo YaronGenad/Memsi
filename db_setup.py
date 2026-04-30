@@ -91,34 +91,71 @@ CREATE TABLE IF NOT EXISTS forecast_events (
 );
 """
 
-_ALL_STATEMENTS = [
+_TABLE_STATEMENTS = [
     ("documents",        _CREATE_DOCUMENTS),
     ("logfile",          _CREATE_LOGFILE),
-    ("logfile_uq_index", _CREATE_LOGFILE_UNIQUE_IDX),
     ("cache_metadata",   _CREATE_CACHE_METADATA),
     ("forecast_history", _CREATE_FORECAST_HISTORY),
     ("forecast_events",  _CREATE_FORECAST_EVENTS),
 ]
 
+# Dedup query: removes duplicate logfile rows, keeping the lowest id per group.
+_DEDUP_LOGFILE = """
+DELETE FROM logfile
+WHERE id NOT IN (
+    SELECT MIN(id)
+    FROM logfile
+    WHERE logdocno IS NOT NULL
+    GROUP BY logdocno, partname, topartdes, tquant, ucost, curdate
+);
+"""
+
 
 def setup_db(verbose: bool = True) -> bool:
     """
-    יוצר את כל הטבלאות והאינדקסים אם לא קיימים.
-    מחזיר True אם הצליח, False אם נכשל.
+    יוצר את כל הטבלאות אם לא קיימות, ומנסה ליצור unique index על logfile.
+    אם יש כפילויות קיימות — מנקה אותן תחילה.
+    מחזיר True אם הצליח, False רק אם החיבור ל-DB נכשל.
     """
     try:
         conn = psycopg2.connect(**DB_CONFIG)
+
+        # שלב 1: טבלאות — חובה
         with conn.cursor() as cur:
-            for name, sql in _ALL_STATEMENTS:
+            for name, sql in _TABLE_STATEMENTS:
                 cur.execute(sql)
                 if verbose:
                     print(f"  ✓ {name}")
         conn.commit()
+
+        # שלב 2: unique index על logfile — אופציונלי (נכשל אם יש כפילויות)
+        with conn.cursor() as cur:
+            try:
+                cur.execute(_CREATE_LOGFILE_UNIQUE_IDX)
+                conn.commit()
+                if verbose:
+                    print("  ✓ logfile_uq_index")
+            except Exception as idx_err:
+                conn.rollback()
+                logger.warning("logfile unique index failed (duplicates exist) — deduplicating: %s", idx_err)
+                if verbose:
+                    print("  ⚠ כפילויות ב-logfile — מנקה...")
+                # מחיקת כפילויות ויצירה מחדש
+                with conn.cursor() as cur2:
+                    cur2.execute(_DEDUP_LOGFILE)
+                    deleted = cur2.rowcount
+                    cur2.execute(_CREATE_LOGFILE_UNIQUE_IDX)
+                conn.commit()
+                logger.info("db_setup: deduped %d logfile rows, index created", deleted)
+                if verbose:
+                    print(f"  ✓ logfile_uq_index (הוסרו {deleted} כפילויות)")
+
         conn.close()
         logger.info("db_setup: all tables and indexes verified OK")
         if verbose:
             print("\nמסד הנתונים מוכן.")
         return True
+
     except Exception as e:
         logger.error("db_setup failed: %s", e)
         if verbose:
