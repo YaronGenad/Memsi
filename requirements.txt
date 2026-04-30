@@ -3,7 +3,8 @@ openpyxl
 requests
 psycopg2-binary
 python-dateutil
-PyQt5
+PyQt6
+qtpy
 matplotlib
 statsmodels
 prophet
