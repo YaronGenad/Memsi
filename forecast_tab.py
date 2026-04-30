@@ -256,14 +256,19 @@ class ForecastTab(QWidget):
         try:
             self.fdb = ForecastDB()
             self.fdb.setup_tables()
-            branch_codes = self.fdb.get_branches()
+            # רק סניפים שהיו פעילים ב-5 החודשים האחרונים
+            active_branches = self.fdb.get_active_branches(inactive_months=5)
             self._branch_code_map = {}  # label → code
             self.branch_list.clear()
-            for code in branch_codes:
+            for code in active_branches:
                 label = get_display_label(code)
                 self._branch_code_map[label] = code
                 self.branch_list.addItem(label)
-            if not branch_codes:
+            total = len(self.fdb.get_branches())
+            if active_branches:
+                self.status_label.setText(
+                    f"{len(active_branches)} סניפים פעילים (מתוך {total} בסה\"כ)")
+            else:
                 self.status_label.setText(
                     "אין נתונים — הרץ תחילה את backfill_history.py")
         except Exception as e:

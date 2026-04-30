@@ -129,6 +129,47 @@ class ForecastDB:
             cur.execute("SELECT DISTINCT branch FROM forecast_history ORDER BY branch")
             return [r[0] for r in cur.fetchall()]
 
+    def get_active_branches(self, inactive_months: int = 5) -> list[str]:
+        """
+        מחזיר סניפים שהיו פעילים בתוך inactive_months האחרונים ביחס
+        לחודש האחרון שיש בו נתונים בכלל ב-forecast_history.
+        משמש לסינון רשימת הסניפים בממשק התחזיות.
+        """
+        with self.conn.cursor() as cur:
+            # מצא את החודש האחרון בכל הנתונים
+            cur.execute("SELECT MAX(year_month) FROM forecast_history")
+            latest = cur.fetchone()[0]
+            if not latest:
+                return []
+            # חשב את הסף (X חודשים אחורה)
+            from datetime import datetime
+            from dateutil.relativedelta import relativedelta
+            cutoff = (datetime.strptime(latest + "-01", "%Y-%m-%d")
+                      - relativedelta(months=inactive_months - 1)
+                      ).strftime("%Y-%m")
+            cur.execute("""
+                SELECT DISTINCT branch
+                FROM forecast_history
+                WHERE year_month >= %s
+                ORDER BY branch
+            """, (cutoff,))
+            return [r[0] for r in cur.fetchall()]
+
+    def get_months_for_branch(self, branch: str) -> list[str]:
+        """מחזיר רשימת חודשים שיש בהם נתונים לסניף הנתון"""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT year_month FROM forecast_history WHERE branch = %s",
+                (branch,)
+            )
+            return [r[0] for r in cur.fetchall()]
+
+    def delete_branch_history(self, branch: str):
+        """מוחק את כל ההיסטוריה של סניף מסוים"""
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM forecast_history WHERE branch = %s", (branch,))
+        self.conn.commit()
+
     # ------------------------------------------------------------------ #
     #  forecast_events                                                     #
     # ------------------------------------------------------------------ #

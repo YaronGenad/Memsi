@@ -64,6 +64,37 @@ def fetch_missing_months(cache: CacheManager, months: list[str]):
             time.sleep(API_DELAY_SEC)
 
 
+import re as _re
+
+# נרמול שמות — אנגלית/עברית/גרסאות שונות → שם קנוני
+_BRANCH_ALIASES = {
+    'HALEL KFAR SABA':  'הלל כפר סבא',
+    'הילל':             'הלל כפר סבא',
+    'SH. TIK HOLON':    'ש.תיק חולון',
+    'שין תיק':          'ש.תיק חולון',
+    'שיח תיק':          'ש.תיק חולון',
+    'ש.תיק חולו':       'ש.תיק חולון',   # קיצור חלקי
+}
+
+# תבנית תאריך: DD/MM/YY, DD.MM.YY, DD/MM/YYYY
+_DATE_PAT = _re.compile(r'\b\d{1,2}[./]\d{1,2}[./]\d{2,4}\b')
+
+def _resolve_branch(doc: dict) -> str:
+    """מחזיר שם סניף: BRANCHNAME אם קיים, אחרת DETAILS מנורמל."""
+    branch = (doc or {}).get('BRANCHNAME') or ''
+    if branch:
+        return branch
+    details = ((doc or {}).get('DETAILS') or '').strip()
+    # הסר "משווק - " prefix
+    if details.startswith('משווק - '):
+        details = details[len('משווק - '):]
+    # נרמל וריאנטים עם תאריך ("מיכאל ידני 30/01/25", "16/10/25", וכדומה)
+    details_no_date = _DATE_PAT.sub('', details).strip()
+    if details_no_date != details:          # תאריך הוסר
+        details = details_no_date          # עשוי להיות ריק → 'לא ידוע' בסוף
+    return _BRANCH_ALIASES.get(details, details) or 'לא ידוע'
+
+
 def aggregate_month(cache: CacheManager, ym: str) -> list[dict]:
     """
     מחזיר רשימת {branch, luggage_type, year_month, quantity}
@@ -88,8 +119,8 @@ def aggregate_month(cache: CacheManager, ym: str) -> list[dict]:
             continue
 
         # מציאת הסניף מהמסמך המקביל
-        doc = next((d for d in documents if d['DOCNO'] == docno), None)
-        branch = (doc or {}).get('BRANCHNAME') or 'לא ידוע'
+        doc    = next((d for d in documents if d['DOCNO'] == docno), None)
+        branch = _resolve_branch(doc)
 
         luggage_type = identify_luggage(log.get('TOPARTDES', ''))
         if not luggage_type:
@@ -121,13 +152,25 @@ def main():
     fetch_missing_months(cache, all_months)
     print("  כל החודשים בcache")
 
+    # מחק שורות "לא ידוע" ישנות ואגרג מחדש את כל החודשים שהכילו אותן
+    unknown_months = fdb.get_months_for_branch('לא ידוע')
+    if unknown_months:
+        print(f"\n[3/4] מוחק {len(unknown_months)} חודשי 'לא ידוע' ומאגרג מחדש...")
+        fdb.delete_branch_history('לא ידוע')
+        for i, ym in enumerate(sorted(unknown_months), 1):
+            records = aggregate_month(cache, ym)
+            fdb.bulk_upsert_history(records)
+            print(f"  [{i}/{len(unknown_months)}] {ym} — {len(records)} שורות")
+    else:
+        print("\n[3/4] אין שורות 'לא ידוע' — דילוג.")
+
     covered = fdb.get_covered_months()
     to_aggregate = [m for m in all_months if m not in covered]
 
     if not to_aggregate:
-        print("\n[3/3] forecast_history כבר מלא — אין מה לאגרג.")
+        print("\n[4/4] forecast_history כבר מלא — אין מה לאגרג.")
     else:
-        print(f"\n[3/3] מאגרג {len(to_aggregate)} חודשים ל-forecast_history...")
+        print(f"\n[4/4] מאגרג {len(to_aggregate)} חודשים ל-forecast_history...")
         for i, ym in enumerate(to_aggregate, 1):
             records = aggregate_month(cache, ym)
             fdb.bulk_upsert_history(records)
