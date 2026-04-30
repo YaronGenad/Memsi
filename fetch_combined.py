@@ -10,12 +10,21 @@ from cache_manager import CacheManager
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 load_dotenv(Path(__file__).parent / '.env')
 
 AUTH_HEADER   = os.environ['PRIORITY_AUTH_HEADER']
 _BASE_URL     = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema')
 DOCUMENTS_URL = f"{_BASE_URL}/DOCUMENTS_D"
 LOGFILE_URL   = f"{_BASE_URL}/LOGFILE"
+
+_RETRY = retry(
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 
 TARGET_CUSTOMERS = [
     '360010009', '360010035', '360250034', '360250041', '360040004',
@@ -24,29 +33,31 @@ TARGET_CUSTOMERS = [
     '360250030', '360250038', '360250039', '360190002', '360250033'
 ]
 
+@_RETRY
 def fetch_documents(start_date, end_date):
     headers = {"Authorization": AUTH_HEADER}
     customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in TARGET_CUSTOMERS])
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})"
     }
-    
-    response = requests.get(DOCUMENTS_URL, headers=headers, params=params)
+
+    response = requests.get(DOCUMENTS_URL, headers=headers, params=params, timeout=30)
     if response.status_code != 200:
         print(f"Error fetching documents: {response.text}")
         return []
-    
+
     data = response.json()
     return data.get('value', [])
 
+@_RETRY
 def fetch_logfile(start_date, end_date):
     headers = {"Authorization": AUTH_HEADER}
     customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in TARGET_CUSTOMERS])
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})"
     }
-    
-    response = requests.get(LOGFILE_URL, headers=headers, params=params)
+
+    response = requests.get(LOGFILE_URL, headers=headers, params=params, timeout=30)
     if response.status_code != 200:
         print(f"Error fetching logfile: {response.text}")
         return []

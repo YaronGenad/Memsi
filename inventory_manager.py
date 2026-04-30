@@ -9,11 +9,20 @@ from db_config import DB_CONFIG
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 load_dotenv(Path(__file__).parent / '.env')
 
 AUTH_HEADER = os.environ['PRIORITY_AUTH_HEADER']
 _BASE_URL   = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema')
 PARTBAL_URL = f"{_BASE_URL}/PARTBAL"
+
+_RETRY = retry(
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 
 SUPPLIER_NAMES = [
     'AMERICAN TRAVEL', 'BENETTON', 'IT', 'JEEP', 'KIIP',
@@ -59,12 +68,16 @@ def fetch_partbal_inventory(warehouse_filter=None, progress_callback=None):
         '$skip': 0,
     }
 
+    @_RETRY
+    def _fetch_page(p):
+        r = requests.get(PARTBAL_URL, headers=headers, params=p, timeout=30)
+        if r.status_code != 200:
+            raise Exception(f"שגיאת API ({r.status_code}): {r.text[:300]}")
+        return r.json().get('value', [])
+
     all_records = []
     while True:
-        response = requests.get(PARTBAL_URL, headers=headers, params=params)
-        if response.status_code != 200:
-            raise Exception(f"שגיאת API ({response.status_code}): {response.text[:300]}")
-        batch = response.json().get('value', [])
+        batch = _fetch_page(params)
         all_records.extend(batch)
         if progress_callback:
             progress_callback(len(all_records))

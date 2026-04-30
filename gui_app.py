@@ -3,8 +3,10 @@ import sys
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from qtpy.QtGui import *
+from qtpy.QtCore import Signal as pyqtSignal
 from datetime import datetime, date
 import calendar
+import pandas as pd
 from dateutil.relativedelta import relativedelta
 from fetch_combined import fetch_with_cache, combine_data, TARGET_CUSTOMERS
 from pricing_data import *
@@ -12,6 +14,70 @@ from product_identification import LUGGAGE_IDENTIFICATION
 from inventory_analysis import filter_by_attributes
 from forecast_tab import ForecastTab
 import pandas as pd
+
+# ════════════════════════════════════════════════
+#  Background workers
+# ════════════════════════════════════════════════
+class ReportWorker(QThread):
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(object)   # pd.DataFrame
+    error    = pyqtSignal(str)
+
+    def __init__(self, start_date, end_date, force_refresh=False, year_month=None):
+        super().__init__()
+        self.start_date     = start_date
+        self.end_date       = end_date
+        self.force_refresh  = force_refresh
+        self.year_month     = year_month
+
+    def run(self):
+        try:
+            if self.force_refresh and self.year_month:
+                from cache_manager import CacheManager
+                self.progress.emit(f"מוחק נתוני {self.year_month} מהמטמון…")
+                cm = CacheManager(); cm.clear_month_data(self.year_month); cm.close()
+
+            self.progress.emit("מושך נתונים מ-Priority…")
+            documents, logfile = fetch_with_cache(self.start_date, self.end_date)
+            self.progress.emit(f"עיבוד {len(documents)} מסמכים…")
+            combined = combine_data(documents, logfile)
+            self.finished.emit(combined)
+        except Exception as e:
+            import traceback; self.error.emit(traceback.format_exc())
+
+
+class MultiMonthReportWorker(QThread):
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(object)   # dict: {sheet_name: pd.DataFrame}
+    error    = pyqtSignal(str)
+
+    def __init__(self, customer_ids, from_date, to_date):
+        super().__init__()
+        self.customer_ids = customer_ids
+        self.from_date    = from_date
+        self.to_date      = to_date
+
+    def run(self):
+        try:
+            sheets = {}
+            current = self.from_date
+            while current <= self.to_date:
+                last_day   = calendar.monthrange(current.year, current.month)[1]
+                month_start = current.strftime("%Y-%m-01")
+                month_end   = current.strftime(f"%Y-%m-{last_day}")
+                ym          = current.strftime("%Y-%m")
+                self.progress.emit(f"מעבד {ym}…")
+                documents, logfile = fetch_with_cache(month_start, month_end)
+                combined = combine_data(documents, logfile)
+                combined = combined[combined['סטטוס'] == 'סופית']
+                combined = combined[combined['מספר לקוח'].isin(self.customer_ids)]
+                if not combined.empty:
+                    sheets[ym] = combined
+                current = (current + relativedelta(months=1)).replace(day=1)
+            self.finished.emit(sheets)
+        except Exception as e:
+            import traceback; self.error.emit(traceback.format_exc())
+
 
 class ReportGeneratorTab(QWidget):
     def __init__(self):
@@ -97,89 +163,71 @@ class ReportGeneratorTab(QWidget):
         layout.addStretch()
         self.setLayout(layout)
     
-    def generate_report(self):
+    def _start_worker(self, force_refresh=False):
+        month = int(self.month_combo.currentText())
+        year  = int(self.year_combo.currentText())
+        last_day   = calendar.monthrange(year, month)[1]
+        start_date = f"{year}-{month:02d}-01"
+        end_date   = f"{year}-{month:02d}-{last_day}"
+        year_month = f"{year}-{month:02d}"
+
         self.status_text.clear()
         self.run_btn.setEnabled(False)
         self.refresh_btn.setEnabled(False)
+        self.status_text.append(f"טוען נתונים עבור {year_month}…\n")
 
+        self._worker = ReportWorker(start_date, end_date,
+                                    force_refresh=force_refresh,
+                                    year_month=year_month if force_refresh else None)
+        self._worker.progress.connect(self.status_text.append)
+        self._worker.finished.connect(self._on_report_ready)
+        self._worker.error.connect(self._on_report_error)
+        self._worker.start()
+
+    def generate_report(self):
+        self._start_worker(force_refresh=False)
+
+    def generate_report_with_refresh(self):
         month = int(self.month_combo.currentText())
-        year = int(self.year_combo.currentText())
+        year  = int(self.year_combo.currentText())
+        year_month = f"{year}-{month:02d}"
+        reply = QMessageBox.question(
+            self, "אישור ריענון",
+            f"פעולה זו תמחק את נתוני {year_month} מהמטמון ותמשוך נתונים חדשים מ-Priority.\nהאם להמשיך?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self._start_worker(force_refresh=True)
 
-        last_day = calendar.monthrange(year, month)[1]
-        start_date = f"{year}-{month:02d}-01"
-        end_date = f"{year}-{month:02d}-{last_day}"
-
-        self.status_text.append(f"מושך נתונים מ-{start_date} עד {end_date}...\n")
-        QApplication.processEvents()
-
+    def _on_report_ready(self, combined):
         try:
-            documents, logfile = fetch_with_cache(start_date, end_date)
-            self.status_text.append(f"✓ נמצאו {len(documents)} מסמכים")
-            self.status_text.append(f"✓ נמצאו {len(logfile)} תנועות")
-            QApplication.processEvents()
-            
-            combined = combine_data(documents, logfile)
-            self.status_text.append(f"✓ משלב נתונים...")
-            QApplication.processEvents()
-            
             with pd.ExcelWriter('combined_output.xlsx', engine='openpyxl') as writer:
                 for customer_id in TARGET_CUSTOMERS:
                     customer_data = combined[combined['מספר לקוח'] == customer_id]
                     if not customer_data.empty:
                         customer_data.to_excel(writer, sheet_name=customer_id, index=False)
-                
                 suppliers_data = combined[combined['פרטים'].notna() & (combined['פרטים'] != '')].copy()
                 if not suppliers_data.empty:
                     suppliers_data['תשלום לספק'] = suppliers_data.apply(
                         lambda row: get_supplier_payment(row['מקט'], row['זיהוי מזוודה'], row['כמות']), axis=1
                     )
                     suppliers_data.to_excel(writer, sheet_name='תשלום לספקים', index=False)
-                
                 combined.to_excel(writer, sheet_name='סיכום חודשי', index=False)
-            
             self.status_text.append(f"\n✓ הקובץ נוצר בהצלחה: combined_output.xlsx")
             self.status_text.append(f"✓ סך הכל {len(combined)} שורות")
             QMessageBox.information(self, "הצלחה", "הדוח נוצר בהצלחה!")
-            
         except Exception as e:
-            self.status_text.append(f"\n✗ שגיאה: {str(e)}")
-            QMessageBox.critical(self, "שגיאה", f"אירעה שגיאה: {str(e)}")
-        
+            self.status_text.append(f"\n✗ שגיאה בשמירה: {e}")
+            QMessageBox.critical(self, "שגיאה", str(e))
+        finally:
+            self.run_btn.setEnabled(True)
+            self.refresh_btn.setEnabled(True)
+
+    def _on_report_error(self, tb):
+        self.status_text.append(f"\n✗ שגיאה:\n{tb[:800]}")
+        QMessageBox.critical(self, "שגיאה", tb[:500])
         self.run_btn.setEnabled(True)
         self.refresh_btn.setEnabled(True)
-
-    def generate_report_with_refresh(self):
-        month = int(self.month_combo.currentText())
-        year = int(self.year_combo.currentText())
-        year_month = f"{year}-{month:02d}"
-
-        reply = QMessageBox.question(
-            self, "אישור ריענון",
-            f"פעולה זו תמחק את נתוני {year_month} מהמטמון ותמשוך נתונים חדשים מ-Priority.\nהאם להמשיך?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        self.status_text.clear()
-        self.run_btn.setEnabled(False)
-        self.refresh_btn.setEnabled(False)
-
-        self.status_text.append(f"מוחק נתוני {year_month} מהמטמון...\n")
-        QApplication.processEvents()
-
-        try:
-            from cache_manager import CacheManager
-            cm = CacheManager()
-            cm.clear_month_data(year_month)
-            cm.close()
-            self.status_text.append(f"✓ נתוני {year_month} נמחקו מהמטמון")
-            QApplication.processEvents()
-        except Exception as e:
-            self.status_text.append(f"⚠ לא ניתן למחוק מטמון: {str(e)}")
-            QApplication.processEvents()
-
-        self.generate_report()
 
 """
 Priority OData batch sender
@@ -419,65 +467,45 @@ class AirlineReportTab(QWidget):
     
     def generate_airline_report(self):
         self.status_text.clear()
-        self.run_btn.setEnabled(False)
-        
         selected_items = self.customers_list.selectedItems()
         if not selected_items:
-            QMessageBox.warning(self, "אזהרה", "יש לבחור לפחות לקוח אחד")
-            self.run_btn.setEnabled(True)
-            return
-        
+            QMessageBox.warning(self, "אזהרה", "יש לבחור לפחות לקוח אחד"); return
+
         customer_ids = [item.text() for item in selected_items]
-        
-        from_month = int(self.from_month.currentText())
-        from_year = int(self.from_year.currentText())
-        to_month = int(self.to_month.currentText())
-        to_year = int(self.to_year.currentText())
-        
-        customers_str = '_'.join(customer_ids[:3]) if len(customer_ids) <= 3 else f"{len(customer_ids)}_customers"
-        self.status_text.append(f"יוצר דוח עבור {len(customer_ids)} לקוחות...\n")
-        QApplication.processEvents()
-        
+        from_date = date(int(self.from_year.currentText()), int(self.from_month.currentText()), 1)
+        to_date   = date(int(self.to_year.currentText()),   int(self.to_month.currentText()),   1)
+
+        self.run_btn.setEnabled(False)
+        self.status_text.append(f"יוצר דוח עבור {len(customer_ids)} לקוחות…\n")
+
+        self._airline_worker = MultiMonthReportWorker(customer_ids, from_date, to_date)
+        self._airline_worker.progress.connect(self.status_text.append)
+        self._airline_worker.finished.connect(
+            lambda sheets: self._on_airline_done(sheets, customer_ids, from_date, to_date))
+        self._airline_worker.error.connect(self._on_airline_error)
+        self._airline_worker.start()
+
+    def _on_airline_done(self, sheets, customer_ids, from_date, to_date):
         try:
-            start_date = date(from_year, from_month, 1)
-            end_date = date(to_year, to_month, calendar.monthrange(to_year, to_month)[1])
-            
-            filename = f"customers_report_{customers_str}_{from_year}{from_month:02d}_{to_year}{to_month:02d}.xlsx"
-            
+            customers_str = '_'.join(customer_ids[:3]) if len(customer_ids) <= 3 else f"{len(customer_ids)}_customers"
+            filename = (f"customers_report_{customers_str}_"
+                        f"{from_date.year}{from_date.month:02d}_"
+                        f"{to_date.year}{to_date.month:02d}.xlsx")
             with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-                current_date = start_date
-                
-                while current_date <= end_date:
-                    month_start = current_date.strftime("%Y-%m-01")
-                    last_day = calendar.monthrange(current_date.year, current_date.month)[1]
-                    month_end = current_date.strftime(f"%Y-%m-{last_day}")
-                    
-                    self.status_text.append(f"מעבד {current_date.strftime('%Y-%m')}...")
-                    QApplication.processEvents()
-                    
-                    documents, logfile = fetch_with_cache(month_start, month_end)
-                    combined = combine_data(documents, logfile)
-                    
-                    combined = combined[combined['סטטוס'] == 'סופית']
-                    combined = combined[combined['מספר לקוח'].isin(customer_ids)]
-                    
-                    if not combined.empty:
-                        sheet_name = current_date.strftime("%Y-%m")
-                        combined.to_excel(writer, sheet_name=sheet_name, index=False)
-                        self.status_text.append(f"  ✓ {len(combined)} שורות")
-                    else:
-                        self.status_text.append(f"  - אין נתונים")
-                    
-                    QApplication.processEvents()
-                    current_date = (current_date + relativedelta(months=1)).replace(day=1)
-            
+                for ym, df in sheets.items():
+                    df.to_excel(writer, sheet_name=ym, index=False)
+                    self.status_text.append(f"  ✓ {ym}: {len(df)} שורות")
             self.status_text.append(f"\n✓ הקובץ נוצר בהצלחה: {filename}")
             QMessageBox.information(self, "הצלחה", f"הדוח נוצר בהצלחה!\n{filename}")
-            
         except Exception as e:
-            self.status_text.append(f"\n✗ שגיאה: {str(e)}")
-            QMessageBox.critical(self, "שגיאה", f"אירעה שגיאה: {str(e)}")
-        
+            self.status_text.append(f"\n✗ שגיאה בשמירה: {e}")
+            QMessageBox.critical(self, "שגיאה", str(e))
+        finally:
+            self.run_btn.setEnabled(True)
+
+    def _on_airline_error(self, tb):
+        self.status_text.append(f"\n✗ שגיאה:\n{tb[:800]}")
+        QMessageBox.critical(self, "שגיאה", tb[:500])
         self.run_btn.setEnabled(True)
 """
 Priority OData batch sender

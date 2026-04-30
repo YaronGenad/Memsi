@@ -13,3 +13,4 @@ scipy
 sqlalchemy
 python-bidi
 python-dotenv
+tenacity

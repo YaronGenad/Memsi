@@ -523,19 +523,25 @@ LUGGAGE_IDENTIFICATION = {
     ]
 }
 
+import re as _re
+
+# בנה מפה: pattern מנורמל → luggage_type — פעם אחת בטעינת המודול
+# סדר לפי אורך יורד כדי שדפוסים ארוכים וספציפיים ינצחו קצרים
+_PATTERNS: list[tuple[_re.Pattern, str]] = sorted(
+    [
+        (_re.compile(_re.escape(' '.join(desc.split())), _re.IGNORECASE), luggage_type)
+        for luggage_type, descs in LUGGAGE_IDENTIFICATION.items()
+        for desc in descs
+    ],
+    key=lambda t: -len(t[0].pattern),
+)
+
+
 def identify_luggage(product_description):
-    """
-    מזהה סוג מזוודה לפי תיאור המוצר
-    """
     if not product_description:
         return None
-
     clean_desc = ' '.join(product_description.split())
-
-    for luggage_type, descriptions in LUGGAGE_IDENTIFICATION.items():
-        for desc in descriptions:
-            clean_pattern = ' '.join(desc.split())
-            if clean_pattern in clean_desc:
-                return luggage_type
-
+    for pattern, luggage_type in _PATTERNS:
+        if pattern.search(clean_desc):
+            return luggage_type
     return None
