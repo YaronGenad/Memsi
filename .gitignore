@@ -10,7 +10,8 @@ venv/
 .venv/
 env/
 
-# Sensitive config — use db_config.example.py as template
+# Sensitive config — use .env.example as template
+.env
 db_config.py
 
 # Build artifacts

@@ -6,8 +6,14 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 from db_config import DB_CONFIG
 
-AUTH_HEADER = "Basic QVBJUjowMDAx"
-PARTBAL_URL = "https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema/PARTBAL"
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / '.env')
+
+AUTH_HEADER = os.environ['PRIORITY_AUTH_HEADER']
+_BASE_URL   = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema')
+PARTBAL_URL = f"{_BASE_URL}/PARTBAL"
 
 SUPPLIER_NAMES = [
     'AMERICAN TRAVEL', 'BENETTON', 'IT', 'JEEP', 'KIIP',

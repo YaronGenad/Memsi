@@ -11,3 +11,5 @@ xgboost
 scikit-learn
 scipy
 sqlalchemy
+python-bidi
+python-dotenv

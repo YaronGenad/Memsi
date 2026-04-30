@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import sys
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
+from qtpy.QtWidgets import *
+from qtpy.QtCore import *
+from qtpy.QtGui import *
 from datetime import datetime, date
 import calendar
 from dateutil.relativedelta import relativedelta
@@ -1327,4 +1327,4 @@ if __name__ == '__main__':
     app.setLayoutDirection(Qt.RightToLeft)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

@@ -33,16 +33,21 @@ def _extend_events(events_df: pd.DataFrame, last_ym: str,
     for _ in range(horizon):
         cur = (cur + relativedelta(months=1))
         ym  = cur.strftime("%Y-%m")
+        _w = int(context.get('is_war', 0))
+        _o = int(context.get('is_military_op', 0))
+        _c = int(context.get('is_ceasefire', 0))
         rows.append({
-            'year_month':     ym,
-            'is_war':         int(context.get('is_war', 0)),
-            'is_military_op': int(context.get('is_military_op', 0)),
-            'is_ceasefire':   int(context.get('is_ceasefire', 0)),
-            'jewish_holiday': int(context.get('jewish_holiday', 0)),
-            'season':         int(context.get('season', _infer_season(ym))),
-            'is_summer_peak': int(context.get('is_summer_peak',
-                                              1 if cur.month in (7, 8) else 0)),
-            'travel_impact':  context.get('travel_impact', 'normal'),
+            'year_month':      ym,
+            'is_war':          _w,
+            'is_military_op':  _o,
+            'is_ceasefire':    _c,
+            'jewish_holiday':  int(context.get('jewish_holiday', 0)),
+            'season':          int(context.get('season', _infer_season(ym))),
+            'is_summer_peak':  int(context.get('is_summer_peak',
+                                               1 if cur.month in (7, 8) else 0)),
+            'travel_impact':   context.get('travel_impact', 'normal'),
+            'is_routine':      int(not (_w or _o or _c)),
+            'is_black_friday': int(cur.month == 11),
         })
     future = pd.DataFrame(rows)
     return pd.concat([events_df, future], ignore_index=True)
@@ -128,7 +133,13 @@ def forecast_prophet(series: pd.Series, horizon: int,
 
     months   = _future_months(series.index[-1], horizon)
     all_ev   = _extend_events(events_df, series.index[-1], horizon, context)
-    ev_idx   = all_ev.set_index('year_month')
+    ev_idx   = all_ev.drop_duplicates(subset='year_month', keep='last').set_index('year_month')
+
+    # חישוב עמודות נגזרות אם חסרות
+    if 'is_routine' not in all_ev.columns:
+        all_ev['is_routine'] = (1 - (all_ev['is_war'] + all_ev['is_military_op'] + all_ev['is_ceasefire']).clip(0, 1)).astype(float)
+    if 'is_black_friday' not in all_ev.columns:
+        all_ev['is_black_friday'] = all_ev['year_month'].str[5:7].astype(int).eq(11).astype(float)
 
     # בניית DataFrame לProphet (ds = תאריך, y = ערך)
     df_train = pd.DataFrame({
@@ -154,16 +165,18 @@ def forecast_prophet(series: pd.Series, horizon: int,
     df_train['ym'] = df_train['ds'].dt.strftime('%Y-%m')
     df_train = df_train.merge(
         all_ev[['year_month','is_war','is_military_op',
-                'is_ceasefire','jewish_holiday','is_summer_peak']],
+                'is_ceasefire','jewish_holiday','is_summer_peak',
+                'is_routine','is_black_friday']],
         left_on='ym', right_on='year_month', how='left'
     ).fillna(0)
 
     regressor_cols = ['is_war','is_military_op','is_ceasefire',
-                      'jewish_holiday','is_summer_peak']
+                      'jewish_holiday','is_summer_peak',
+                      'is_routine','is_black_friday']
 
-    m = Prophet(yearly_seasonality=True, weekly_seasonality=False,
+    m = Prophet(yearly_seasonality=False, weekly_seasonality=False,
                 daily_seasonality=False, interval_width=0.8,
-                changepoint_prior_scale=0.3)
+                changepoint_prior_scale=0.05)
     for col in regressor_cols:
         m.add_regressor(col)
 
@@ -177,10 +190,11 @@ def forecast_prophet(series: pd.Series, horizon: int,
     ).fillna(0)
 
     fc = m.predict(future[['ds'] + regressor_cols])
-    return _result_df(months,
-                      fc['yhat'].values,
-                      fc['yhat_lower'].values,
-                      fc['yhat_upper'].values)
+    hist_cap = max(series.values) * 2
+    pred      = np.clip(fc['yhat'].values,      0, hist_cap)
+    pred_lo   = np.clip(fc['yhat_lower'].values, 0, hist_cap)
+    pred_hi   = np.clip(fc['yhat_upper'].values, 0, hist_cap)
+    return _result_df(months, pred, pred_lo, pred_hi)
 
 
 # ────────────────────────────────────────────────
@@ -192,7 +206,7 @@ XGBOOST_DESCRIPTION = (
 )
 
 def _build_features(series: pd.Series, events_df: pd.DataFrame) -> pd.DataFrame:
-    ev = events_df.set_index('year_month')
+    ev = events_df.drop_duplicates(subset='year_month', keep='last').set_index('year_month')
     rows = []
     yms  = list(series.index)
     for i, ym in enumerate(yms):
@@ -203,12 +217,14 @@ def _build_features(series: pd.Series, events_df: pd.DataFrame) -> pd.DataFrame:
             'quarter':        (m - 1) // 3 + 1,
             'sin_month':      np.sin(2 * np.pi * m / 12),
             'cos_month':      np.cos(2 * np.pi * m / 12),
-            'is_war':         float(ev_row.get('is_war', 0)),
-            'is_military_op': float(ev_row.get('is_military_op', 0)),
-            'is_ceasefire':   float(ev_row.get('is_ceasefire', 0)),
-            'jewish_holiday': float(ev_row.get('jewish_holiday', 0)),
-            'is_summer_peak': float(ev_row.get('is_summer_peak', 0)),
-            'travel_num':     _travel_impact_num(ev_row.get('travel_impact','normal')),
+            'is_war':          float(ev_row.get('is_war', 0)),
+            'is_military_op':  float(ev_row.get('is_military_op', 0)),
+            'is_ceasefire':    float(ev_row.get('is_ceasefire', 0)),
+            'jewish_holiday':  float(ev_row.get('jewish_holiday', 0)),
+            'is_summer_peak':  float(ev_row.get('is_summer_peak', 0)),
+            'travel_num':      _travel_impact_num(ev_row.get('travel_impact','normal')),
+            'is_routine':      float(1 - min(1, float(ev_row.get('is_war',0)) + float(ev_row.get('is_military_op',0)) + float(ev_row.get('is_ceasefire',0)))),
+            'is_black_friday': float(1 if m == 11 else 0),
             'lag1':           float(series.iloc[i-1]) if i > 0 else 0,
             'lag2':           float(series.iloc[i-2]) if i > 1 else 0,
             'lag3':           float(series.iloc[i-3]) if i > 2 else 0,
@@ -226,12 +242,13 @@ def forecast_xgboost(series: pd.Series, horizon: int,
     from xgboost import XGBRegressor
 
     all_ev  = _extend_events(events_df, series.index[-1], horizon, context)
-    ev_idx  = all_ev.set_index('year_month')
+    ev_idx  = all_ev.drop_duplicates(subset='year_month', keep='last').set_index('year_month')
     months  = _future_months(series.index[-1], horizon)
 
     feat_cols = ['month','quarter','sin_month','cos_month',
                  'is_war','is_military_op','is_ceasefire',
                  'jewish_holiday','is_summer_peak','travel_num',
+                 'is_routine','is_black_friday',
                  'lag1','lag2','lag3','lag12','roll3_mean','roll6_mean']
 
     df_feat = _build_features(series, all_ev)
@@ -259,6 +276,8 @@ def forecast_xgboost(series: pd.Series, horizon: int,
             float(ev_row.get('jewish_holiday',0)),
             float(ev_row.get('is_summer_peak',0)),
             _travel_impact_num(ev_row.get('travel_impact','normal')),
+            float(1 - min(1, float(ev_row.get('is_war',0)) + float(ev_row.get('is_military_op',0)) + float(ev_row.get('is_ceasefire',0)))),
+            float(1 if m == 11 else 0),
             extended[-1], extended[-2] if n>1 else 0,
             extended[-3] if n>2 else 0,
             extended[-12] if n>=12 else float(np.mean(extended)),

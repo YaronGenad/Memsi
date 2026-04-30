@@ -7,9 +7,15 @@ from pricing_data import get_repair_price, is_repair_item, get_replacement_price
 from product_identification import identify_luggage
 from cache_manager import CacheManager
 
-AUTH_HEADER = "Basic QVBJUjowMDAx"
-DOCUMENTS_URL = "https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema/DOCUMENTS_D"
-LOGFILE_URL = "https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema/LOGFILE"
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / '.env')
+
+AUTH_HEADER   = os.environ['PRIORITY_AUTH_HEADER']
+_BASE_URL     = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema')
+DOCUMENTS_URL = f"{_BASE_URL}/DOCUMENTS_D"
+LOGFILE_URL   = f"{_BASE_URL}/LOGFILE"
 
 TARGET_CUSTOMERS = [
     '360010009', '360010035', '360250034', '360250041', '360040004',
