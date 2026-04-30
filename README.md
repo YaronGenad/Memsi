@@ -53,7 +53,19 @@ DB_PASSWORD=<your-password>
 
 > **חשוב:** לעולם אל תעלה את קובץ `.env` ל-Git. הוא נמצא ב-`.gitignore`.
 
-### 4. הרצה
+### 4. אתחול מסד הנתונים
+
+בהרצה הראשונה — או בכל פעם שרוצים לאמת שהסכמה קיימת:
+
+```bash
+python db_setup.py
+```
+
+הסקריפט יוצר את כל הטבלאות והאינדקסים (`CREATE TABLE IF NOT EXISTS`) — בטוח להרצה חוזרת.
+
+> האפליקציה מריצה את `db_setup` אוטומטית בהפעלה, כך שבדרך כלל אין צורך להריץ ידנית.
+
+### 5. הרצה
 
 ```bash
 python gui_app.py
@@ -71,8 +83,9 @@ python gui_app.py
 | `fetch_combined.py` | שליפה מ-Priority API עם מטמון |
 | `inventory_manager.py` | שליפת מלאי מ-PARTBAL |
 | `product_identification.py` | זיהוי קטגוריית מזוודה לפי תיאור |
-| `cache_manager.py` | ניהול מטמון SQLite מקומי |
-| `db_config.py` | פרמטרי חיבור ל-PostgreSQL |
+| `cache_manager.py` | מטמון מסמכים ותנועות ב-PostgreSQL |
+| `db_config.py` | adapter — קורא `DB_*` מ-`.env` ומייצא `DB_CONFIG` |
+| `db_setup.py` | bootstrap סכמה — `CREATE TABLE IF NOT EXISTS` לכל הטבלאות |
 | `logger.py` | לוגים יומיים ב-`~/.memsi/logs/` |
 
 ---
@@ -86,6 +99,20 @@ C:\Users\<username>\.memsi\logs\memsi.log
 ```
 
 נשמרים 30 קבצי לוג אחרונים (גלגול יומי). בכל הפעלה נבדקת זמינות DB ו-Priority API — תוצאות מוצגות בשורת הסטטוס התחתית.
+
+---
+
+## מסד הנתונים
+
+כל הנתונים נשמרים ב-**PostgreSQL** (לא SQLite). קונפיגורציה נקראת דרך `db_config.py` שמייבא מ-`.env`.
+
+| טבלה | תוכן |
+|------|------|
+| `documents` | מסמכי Priority (DOCUMENTS_D) — מפתח: `docno` |
+| `logfile` | תנועות (LOGFILE) — unique index composite על 6 שדות |
+| `cache_metadata` | אילו חודשים נשמרו — מפתח: `(data_type, year_month)` |
+| `forecast_history` | היסטוריית מכירות לתחזיות — מפתח: `(branch, luggage_type, year_month)` |
+| `forecast_events` | אירועים ומצבים (מלחמה, חגים) — מפתח: `year_month` |
 
 ---
 

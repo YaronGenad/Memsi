@@ -34,37 +34,51 @@ TARGET_CUSTOMERS = [
     '360250030', '360250038', '360250039', '360190002', '360250033'
 ]
 
-@_RETRY
+def _fetch_odata_all(url: str, params: dict) -> list:
+    """שולף כל הדפים מ-OData endpoint עם $top/$skip pagination."""
+    headers = {"Authorization": AUTH_HEADER}
+    all_records = []
+    params = dict(params)
+    params['$top'] = 1000
+    params['$skip'] = 0
+
+    @_RETRY
+    def _page(p):
+        r = requests.get(url, headers=headers, params=p, timeout=30)
+        if r.status_code != 200:
+            logger.error("OData %s HTTP %s: %s", url, r.status_code, r.text[:300])
+            raise Exception(f"HTTP {r.status_code}: {r.text[:200]}")
+        return r.json().get('value', [])
+
+    while True:
+        batch = _page(params)
+        all_records.extend(batch)
+        if len(batch) < 1000:
+            break
+        params['$skip'] += 1000
+        logger.debug("_fetch_odata_all %s: fetched %d so far", url, len(all_records))
+
+    return all_records
+
+
 def fetch_documents(start_date, end_date):
-    headers = {"Authorization": AUTH_HEADER}
     customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in TARGET_CUSTOMERS])
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})"
     }
+    records = _fetch_odata_all(DOCUMENTS_URL, params)
+    logger.info("fetch_documents %s→%s: %d records", start_date, end_date, len(records))
+    return records
 
-    response = requests.get(DOCUMENTS_URL, headers=headers, params=params, timeout=30)
-    if response.status_code != 200:
-        logger.error("fetch_documents HTTP %s: %s", response.status_code, response.text[:300])
-        return []
 
-    data = response.json()
-    return data.get('value', [])
-
-@_RETRY
 def fetch_logfile(start_date, end_date):
-    headers = {"Authorization": AUTH_HEADER}
     customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in TARGET_CUSTOMERS])
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})"
     }
-
-    response = requests.get(LOGFILE_URL, headers=headers, params=params, timeout=30)
-    if response.status_code != 200:
-        logger.error("fetch_logfile HTTP %s: %s", response.status_code, response.text[:300])
-        return []
-    
-    data = response.json()
-    return data.get('value', [])
+    records = _fetch_odata_all(LOGFILE_URL, params)
+    logger.info("fetch_logfile %s→%s: %d records", start_date, end_date, len(records))
+    return records
 
 def fetch_with_cache(start_date, end_date):
     """

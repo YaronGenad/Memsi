@@ -1400,14 +1400,15 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     def _run_health_checks(self):
-        # DB — סנכרוני (חסימה קצרה בהפעלה, כשל = אזהרה קריטית)
+        # DB — סנכרוני: bootstrap סכמה + בדיקת חיבור
         try:
-            import psycopg2
-            from db_config import DB_CONFIG
-            conn = psycopg2.connect(**DB_CONFIG, connect_timeout=5)
-            conn.close()
-            self._set_status(self._db_dot, self._db_lbl, True, "DB: מחובר")
-            logger.info("health_check DB: OK")
+            from db_setup import setup_db
+            ok = setup_db(verbose=False)
+            if ok:
+                self._set_status(self._db_dot, self._db_lbl, True, "DB: מחובר")
+                logger.info("health_check DB: OK")
+            else:
+                raise RuntimeError("setup_db returned False")
         except Exception as e:
             self._set_status(self._db_dot, self._db_lbl, False, f"DB: {str(e)[:60]}")
             logger.error("health_check DB failed: %s", e)

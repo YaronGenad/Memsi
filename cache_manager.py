@@ -75,9 +75,10 @@ class CacheManager:
         
         for log in logfile_records:
             cursor.execute("""
-                INSERT INTO logfile (logdocno, curdate, partname, topartdes, 
-                                   tquant, ucost, custname)
+                INSERT INTO logfile (logdocno, curdate, partname, topartdes,
+                                    tquant, ucost, custname)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (logdocno, partname, topartdes, tquant, ucost, curdate) DO NOTHING
             """, (
                 log.get('LOGDOCNO'),
                 log.get('CURDATE'),
