@@ -5,7 +5,7 @@
 -- כל הטבלאות עם updated_at + updated_by ל-audit פשוט.
 
 -- ============================================================
---  Customers — מיפוי קוד לקוח (Priority) → tier מחירון
+--  Customers - מיפוי קוד לקוח (Priority) ל-tier מחירון
 -- ============================================================
 CREATE TABLE IF NOT EXISTS customers (
     code            TEXT PRIMARY KEY,           -- 360010009 וכו'
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS pricing_tiers (
 );
 
 -- ============================================================
---  Customer repair pricing — מחיר תיקון לפי tier ומק"ט
+--  Customer repair pricing - מחיר תיקון לפי tier ומק"ט
 -- ============================================================
 CREATE TABLE IF NOT EXISTS customer_repair_prices (
     pricing_tier    TEXT NOT NULL REFERENCES pricing_tiers(code) ON UPDATE CASCADE,
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS customer_repair_prices (
 );
 
 -- ============================================================
---  Customer replacement pricing — מחיר החלפה לפי tier וסוג מזוודה
+--  Customer replacement pricing - מחיר החלפה לפי tier וסוג מזוודה
 -- ============================================================
 CREATE TABLE IF NOT EXISTS customer_replacement_prices (
     pricing_tier    TEXT NOT NULL REFERENCES pricing_tiers(code) ON UPDATE CASCADE,
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS customer_replacement_prices (
 );
 
 -- ============================================================
---  Supplier pricing — תשלום לספק (לא תלוי בלקוח)
+--  Supplier pricing - תשלום לספק (לא תלוי בלקוח)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS supplier_repair_prices (
     part_sku        TEXT PRIMARY KEY,
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS supplier_replacement_prices (
 );
 
 -- ============================================================
---  Branches — קוד סניף → שם תצוגה
+--  Branches - קוד סניף לשם תצוגה
 -- ============================================================
 CREATE TABLE IF NOT EXISTS branches (
     code            TEXT PRIMARY KEY,
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS branches (
 );
 
 -- ============================================================
---  Warehouses — מחסנים
+--  Warehouses - מחסנים
 -- ============================================================
 CREATE TABLE IF NOT EXISTS warehouses (
     code            INTEGER PRIMARY KEY,
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS warehouses (
 );
 
 -- ============================================================
---  Luggage identification — תיאור מוצר → קטגוריית מזוודה
+--  Luggage identification - תיאור מוצר לקטגוריית מזוודה
 -- ============================================================
 CREATE TABLE IF NOT EXISTS luggage_identification (
     description     TEXT PRIMARY KEY,
@@ -109,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_luggage_identification_category
     ON luggage_identification (category);
 
 -- ============================================================
---  Audit log — שמירת היסטוריית שינויים (insert-only)
+--  Audit log - שמירת היסטוריית שינויים (insert-only)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS domain_audit_log (
     id              SERIAL PRIMARY KEY,

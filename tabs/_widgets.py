@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-tabs/_widgets.py — קומפוננטות UI משותפות לכל ה-tabs.
+tabs/_widgets.py - קומפוננטות UI משותפות לכל ה-tabs.
 
-MonthYearPicker  — בחירת חודש+שנה (ComboBoxes), כמו שהיה ב-report_tab.
-DateRangePicker  — בחירת חודש+שנה לתאריך התחלה ולתאריך סיום (לדוחות מרובי-חודשים).
-ExcelExporter    — עזר ליצוא DataFrame או dict-של-DataFrames לקובץ אחד עם sheets.
+MonthYearPicker  - בחירת חודש+שנה (ComboBoxes), כמו שהיה ב-report_tab.
+DateRangePicker  - בחירת חודש+שנה לתאריך התחלה ולתאריך סיום (לדוחות מרובי-חודשים).
+ExcelExporter    - עזר ליצוא DataFrame או dict-של-DataFrames לקובץ אחד עם sheets.
 """
 from __future__ import annotations
 import calendar
@@ -17,9 +17,9 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Pickers
-# ============================================================
+# ────────────────────────────────────────────────
 class MonthYearPicker(QWidget):
     """
     שלוש שליטות: חודש (01..12), שנה (year_min..year_max).
@@ -93,9 +93,9 @@ class DateRangePicker(QGroupBox):
         return start, end
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  ExcelExporter
-# ============================================================
+# ────────────────────────────────────────────────
 class ExcelExporter:
     """
     עוטף את הדפוס pd.ExcelWriter(filename) → df.to_excel(sheet=...) שחוזר ב-5 טאבים.

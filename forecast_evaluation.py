@@ -5,7 +5,7 @@ forecast_evaluation.py
 - save_run: שומר ריצת תחזית מלאה ב-forecast_runs / _predictions / _metrics.
 - get_run_history: רשימת ריצות אחרונות עבור UI.
 
-עובד עם forecast_engine הקיים — אין שינוי באלגוריתמים, רק evaluation סביבם.
+עובד עם forecast_engine הקיים - אין שינוי באלגוריתמים, רק evaluation סביבם.
 """
 from __future__ import annotations
 import json
@@ -25,9 +25,9 @@ _MODEL_FNS: dict[str, Callable] = {
 }
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Metrics
-# ============================================================
+# ────────────────────────────────────────────────
 def _mae(actual: np.ndarray, predicted: np.ndarray) -> float:
     return float(np.mean(np.abs(actual - predicted)))
 
@@ -37,22 +37,22 @@ def _rmse(actual: np.ndarray, predicted: np.ndarray) -> float:
 
 
 def _mape(actual: np.ndarray, predicted: np.ndarray) -> float | None:
-    """MAPE — מוגדר רק כשactual!=0; מחזיר None אם אין שורה תקפה."""
+    """MAPE - מוגדר רק כשactual!=0; מחזיר None אם אין שורה תקפה."""
     mask = actual != 0
     if not mask.any():
         return None
     return float(np.mean(np.abs((actual[mask] - predicted[mask]) / actual[mask])) * 100.0)
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Backtest
-# ============================================================
+# ────────────────────────────────────────────────
 def backtest(series: pd.Series, events_df: pd.DataFrame, context: dict,
              test_size: int = 6) -> dict[str, dict]:
     """
     מאמן כל מודל על series[:-test_size] וחוזה את החלק האחרון.
     מחזיר dict: {model: {'mae': X, 'rmse': Y, 'mape': Z|None, 'test_n': N}}.
-    אם הסדרה קצרה מדי — מחזיר dict ריק (אין מספיק נתונים).
+    אם הסדרה קצרה מדי - מחזיר dict ריק (אין מספיק נתונים).
     """
     if len(series) < test_size + 6:
         logger.info("backtest: series too short (%d < %d+6), skipping",
@@ -84,16 +84,16 @@ def backtest(series: pd.Series, events_df: pd.DataFrame, context: dict,
     return metrics
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Persistence
-# ============================================================
+# ────────────────────────────────────────────────
 def save_run(branches: list[str], categories: list[str],
              horizon_months: int, context: dict, series_n: int,
              results: dict, metrics: dict | None = None,
              ran_by: str | None = None, notes: str | None = None) -> int:
     """
     שומר ריצת תחזית ב-forecast_runs (+ predictions + metrics).
-    results: dict[model→DataFrame(year_month, forecast, lower, upper)]
+    results: dict[model -> DataFrame(year_month, forecast, lower, upper)]
              שווה לפלט של forecast_engine.run_all_models.
     מחזיר run_id.
     """

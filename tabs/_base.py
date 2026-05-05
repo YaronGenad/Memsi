@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-tabs/_base.py — תשתית משותפת לכל ה-tabs.
+tabs/_base.py - תשתית משותפת לכל ה-tabs.
 
 BaseTabWorker
     QThread עם signals אחידים:
-      - progress(str)         — עדכוני סטטוס לטקסט החי
-      - finished(object)      — תוצאה מוצלחת (DataFrame, dict, וכו')
-      - error(str)            — traceback מפורמט (כבר logged)
+      - progress(str)         - עדכוני סטטוס לטקסט החי
+      - finished(object)      - תוצאה מוצלחת (DataFrame, dict, וכו')
+      - error(str)            - traceback מפורמט (כבר logged)
     תומך ב-cancel() ב-best-effort: לבדיקה בלולאות פנימיות.
     בנוי כך שמחלקה יורשת רק מממשת _do() ומשתמשת ב-self.progress.emit().
 
@@ -125,4 +125,4 @@ def format_error_for_user(tb: str, max_chars: int = 800) -> str:
     if len(tb) <= max_chars:
         return tb
     head = '\n'.join(lines[:5])
-    return f"{head}\n...\n{last_line}\n\n[traceback קצורה — ראה memsi.log למידע מלא]"
+    return f"{head}\n...\n{last_line}\n\n[traceback קצורה - ראה memsi.log למידע מלא]"

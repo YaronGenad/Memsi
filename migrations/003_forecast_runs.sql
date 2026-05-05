@@ -25,7 +25,7 @@ CREATE INDEX IF NOT EXISTS idx_forecast_runs_ran_at
     ON forecast_runs (ran_at DESC);
 
 
--- תחזיות עצמן — שורה לכל (run, model, year_month)
+-- תחזיות עצמן - שורה לכל (run, model, year_month)
 CREATE TABLE IF NOT EXISTS forecast_predictions (
     run_id          INTEGER NOT NULL REFERENCES forecast_runs(run_id) ON DELETE CASCADE,
     model           TEXT NOT NULL,        -- arima / prophet / xgboost / avg

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-forecast_cache.py — מטמון תחזיות בדיסק.
+forecast_cache.py - מטמון תחזיות בדיסק.
 
 מסמן ריצה לפי hash של (model, series_values, horizon, context, events_subset).
-אם hash זהה לאחת שכבר רצה → מחזיר תוצאה שמורה בלי לאמן מחדש.
+אם hash זהה לאחת שכבר רצה, מחזיר תוצאה שמורה בלי לאמן מחדש.
 
 משמעותי בעיקר ל-Prophet ו-XGBoost שלוקחים שניות-עשרות שניות לאמן;
 ARIMA מהיר ולא נכלל אם רוצים (אבל אין נזק לכלול אותו).
@@ -42,15 +42,15 @@ def _key(model: str, series: pd.Series, horizon: int,
     h.update(model.encode())
     h.update(str(horizon).encode())
 
-    # series — index (ym) + values בעיגול ל-2 ספרות
+    # series - index (ym) + values בעיגול ל-2 ספרות
     for ym, val in zip(series.index, series.values):
         h.update(f"{ym}={float(val):.2f};".encode())
 
-    # context — מסודר לפי key
+    # context - מסודר לפי key
     h.update(json.dumps(context, sort_keys=True, ensure_ascii=False,
                         default=str).encode())
 
-    # events — רק חודשים שעשויים להשפיע (היסטוריה + horizon חודשים קדימה)
+    # events - רק חודשים שעשויים להשפיע (היסטוריה + horizon חודשים קדימה)
     if events_df is not None and not events_df.empty:
         evt = events_df.copy()
         if 'year_month' in evt.columns:
@@ -119,9 +119,9 @@ def clear_all():
     return n
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Wrapped model functions (drop-in replacements)
-# ============================================================
+# ────────────────────────────────────────────────
 def cached_arima(series, horizon, events_df, context):
     df = get('arima', series, horizon, events_df, context)
     if df is not None:

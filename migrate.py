@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-migrate.py — runner מיגרציות בסיסי.
+runner מיגרציות בסיסי.
 
 מריץ את כל הקבצים ב-migrations/ לפי סדר האלפבית, מתעד את מה שכבר רץ
 בטבלת schema_version, ומונע הרצה כפולה.
 
 תומך בשני סוגי קבצים:
-  - *.sql  — מבוצע ישירות עם psycopg2
-  - *.py   — מיובא ומריץ run(conn) מתוכו
+  *.sql  מבוצע ישירות עם psycopg2
+  *.py   מיובא ומריץ run(conn) מתוכו
 
 שימוש:
-    python migrate.py            — מריץ מיגרציות שעוד לא רצו
-    python migrate.py --status   — מציג מה רץ ומה לא
-    python migrate.py --dry-run  — בדיקה בלי לבצע
+    python migrate.py            מריץ מיגרציות שעוד לא רצו
+    python migrate.py --status   מציג מה רץ ומה לא
+    python migrate.py --dry-run  בדיקה בלי לבצע
 """
 import os
 import sys

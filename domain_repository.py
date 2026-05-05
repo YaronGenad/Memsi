@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-domain_repository.py — שכבת data access לטבלאות הdomain שנוצרו ב-001+002.
+domain_repository.py - שכבת data access לטבלאות הdomain שנוצרו ב-001+002.
 
 מחליף את הקריאות הישירות ל-dict-ים ב-pricing_data.py / branch_names.py /
 warehouse_config.py / product_identification.py. הקבצים הישנים הפכו ל-shims
@@ -21,10 +21,10 @@ from db_config import get_conn
 from logger import logger
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  In-memory cache עם invalidation גלובלי
-# ============================================================
-_cache_lock = threading.RLock()  # reentrant — _load_X may itself call _cached
+# ────────────────────────────────────────────────
+_cache_lock = threading.RLock()  # reentrant - _load_X may itself call _cached
 _cache: dict[str, Any] = {}
 
 
@@ -48,9 +48,9 @@ def invalidate(*keys: str):
             _cache.pop(k, None)
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Audit
-# ============================================================
+# ────────────────────────────────────────────────
 def _audit(cur, table_name: str, op: str, key: dict,
            old: dict | None, new: dict | None, user: str | None):
     cur.execute("""
@@ -66,9 +66,9 @@ def _audit(cur, table_name: str, op: str, key: dict,
     ))
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Customers + pricing tiers
-# ============================================================
+# ────────────────────────────────────────────────
 def get_customer_pricing_tier(customer_code: str) -> str | None:
     """מחזיר את ה-tier (ELAL / DELTA / ...) של לקוח, או None."""
     mapping = _cached('customer_tier_map', _load_customer_tier_map)
@@ -107,9 +107,9 @@ def _load_pricing_tiers() -> list[str]:
         return [row[0] for row in cur.fetchall()]
 
 
-# ============================================================
-#  Customer pricing — repair + replacement
-# ============================================================
+# ────────────────────────────────────────────────
+#  Customer pricing - repair + replacement
+# ────────────────────────────────────────────────
 def get_repair_price(customer_code: str, part_sku: str) -> float | None:
     tier = get_customer_pricing_tier(customer_code)
     if tier is None:
@@ -215,9 +215,9 @@ def upsert_customer_replacement_price(tier: str, luggage_type: str,
                 tier, luggage_type, price, user)
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Supplier pricing
-# ============================================================
+# ────────────────────────────────────────────────
 def get_supplier_repair_price(part_sku: str) -> float | None:
     table = _cached('supplier_repair', _load_supplier_repair)
     return table.get(str(part_sku))
@@ -299,9 +299,9 @@ def upsert_supplier_replacement_price(luggage_type: str, price: float,
     invalidate('supplier_replacement')
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Branches
-# ============================================================
+# ────────────────────────────────────────────────
 def get_branch_name(code: str) -> str:
     """מחזיר שם תצוגה לקוד סניף, או את הקוד עצמו."""
     table = _cached('branches', _load_branches)
@@ -329,9 +329,9 @@ def _load_branches() -> dict[str, str]:
         return {code: name for code, name in cur.fetchall()}
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Warehouses
-# ============================================================
+# ────────────────────────────────────────────────
 def list_warehouses(active_only: bool = True) -> dict[int, str]:
     key = 'warehouses_active' if active_only else 'warehouses_all'
     return dict(_cached(key, lambda: _load_warehouses(active_only)))
@@ -347,12 +347,12 @@ def _load_warehouses(active_only: bool) -> dict[int, str]:
         return {int(code): name for code, name in cur.fetchall()}
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Luggage identification
-# ============================================================
+# ────────────────────────────────────────────────
 def identify_luggage(description: str) -> str | None:
     """מחזיר קטגוריה לתיאור מוצר.
-    משתמש ב-regex substring matching (כמו המימוש המקורי) — תיאור הקלט
+    משתמש ב-regex substring matching (כמו המימוש המקורי) - תיאור הקלט
     יכול להיות חלק מהתיאור הרשום, וגם לכלול וריאציות רווחים."""
     if not description:
         return None
@@ -431,9 +431,9 @@ def _load_repair_skus() -> list[str]:
         return [r[0] for r in cur.fetchall()]
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Audit log reader
-# ============================================================
+# ────────────────────────────────────────────────
 def get_recent_audit(limit: int = 50, table_name: str | None = None) -> list[dict]:
     """מחזיר רשומות אודיט אחרונות, החדשות קודם."""
     sql = """
@@ -453,9 +453,9 @@ def get_recent_audit(limit: int = 50, table_name: str | None = None) -> list[dic
             return [dict(r) for r in cur.fetchall()]
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Current user (for audit attribution)
-# ============================================================
+# ────────────────────────────────────────────────
 def get_current_user() -> str:
     """מחזיר את ה-Windows username של המשתמש הנוכחי, ל-audit attribution."""
     import os
@@ -486,4 +486,4 @@ def add_luggage_identification(description: str, category: str,
         conn.commit()
     invalidate('luggage_id', 'luggage_categories',
                'luggage_by_category', 'luggage_patterns')
-    logger.info("add luggage_id: '%s' → %s by=%s", description, category, user)
+    logger.info("add luggage_id: '%s' as %s by=%s", description, category, user)

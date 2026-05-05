@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-updates_tab.py — עריכת מחירונים, סניפים, וזיהוי מזוודות.
+updates_tab.py - עריכת מחירונים, סניפים, וזיהוי מזוודות.
 
 כותב ישירות ל-DB דרך domain_repository, עם audit log.
 """
@@ -21,9 +21,9 @@ import domain_repository as repo
 from logger import logger
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Helpers
-# ============================================================
+# ────────────────────────────────────────────────
 def _styled_table(headers: list[str], header_bg: str = '#2c3e50') -> QTableWidget:
     t = QTableWidget(0, len(headers))
     t.setHorizontalHeaderLabels(headers)
@@ -60,9 +60,9 @@ def _save_button(text: str = "שמור עדכון") -> QPushButton:
     return btn
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Section: customer repair prices
-# ============================================================
+# ────────────────────────────────────────────────
 class _CustomerRepairForm(QWidget):
     def __init__(self, parent_tab):
         super().__init__()
@@ -140,15 +140,15 @@ class _CustomerRepairForm(QWidget):
                                               user=repo.get_current_user())
             self._reload_table()
             self.parent_tab.refresh_audit()
-            QMessageBox.information(self, "✓", f"מחיר תיקון עודכן: {tier}/{sku} = {price:.2f}")
+            QMessageBox.information(self, "הצלחה",f"מחיר תיקון עודכן: {tier}/{sku} = {price:.2f}")
         except Exception as e:
             logger.exception("save customer_repair_price failed")
             QMessageBox.critical(self, "שגיאה", f"{type(e).__name__}: {e}")
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Section: customer replacement prices
-# ============================================================
+# ────────────────────────────────────────────────
 class _CustomerReplacementForm(QWidget):
     def __init__(self, parent_tab):
         super().__init__()
@@ -218,15 +218,15 @@ class _CustomerReplacementForm(QWidget):
                 tier, lt, price, user=repo.get_current_user())
             self._reload_table()
             self.parent_tab.refresh_audit()
-            QMessageBox.information(self, "✓", f"מחיר החלפה עודכן: {tier}/{lt} = {price:.2f}")
+            QMessageBox.information(self, "הצלחה",f"מחיר החלפה עודכן: {tier}/{lt} = {price:.2f}")
         except Exception as e:
             logger.exception("save customer_replacement_price failed")
             QMessageBox.critical(self, "שגיאה", f"{type(e).__name__}: {e}")
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Section: supplier prices (repair + replacement together)
-# ============================================================
+# ────────────────────────────────────────────────
 class _SupplierForm(QWidget):
     def __init__(self, parent_tab):
         super().__init__()
@@ -311,15 +311,15 @@ class _SupplierForm(QWidget):
                 repo.upsert_supplier_replacement_price(item, price, user=user)
             self._reload_table()
             self.parent_tab.refresh_audit()
-            QMessageBox.information(self, "✓", f"מחיר ספק ({kind}): {item} = {price:.2f}")
+            QMessageBox.information(self, "הצלחה",f"מחיר ספק ({kind}): {item} = {price:.2f}")
         except Exception as e:
             logger.exception("save supplier price failed")
             QMessageBox.critical(self, "שגיאה", f"{type(e).__name__}: {e}")
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Section: luggage identification
-# ============================================================
+# ────────────────────────────────────────────────
 class _LuggageIdForm(QWidget):
     def __init__(self, parent_tab):
         super().__init__()
@@ -406,15 +406,15 @@ class _LuggageIdForm(QWidget):
             self._reload_table()
             self.parent_tab.refresh_audit()
             self.description.clear()
-            QMessageBox.information(self, "✓", f"זיהוי מזוודה נוסף: '{desc}' → {cat}")
+            QMessageBox.information(self, "הצלחה",f"זיהוי מזוודה נוסף: '{desc}' → {cat}")
         except Exception as e:
             logger.exception("add luggage_identification failed")
             QMessageBox.critical(self, "שגיאה", f"{type(e).__name__}: {e}")
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Section: forecast_events editor (חגים, מלחמה, מבצעים…)
-# ============================================================
+# ────────────────────────────────────────────────
 class _ForecastEventsForm(QWidget):
     TRAVEL_OPTIONS = ['collapse', 'very_low', 'low', 'recovering', 'normal', 'high']
 
@@ -539,15 +539,15 @@ class _ForecastEventsForm(QWidget):
             )
             db.close()
             self._reload_table()
-            QMessageBox.information(self, "✓", f"אירוע {ym} עודכן")
+            QMessageBox.information(self, "הצלחה",f"אירוע {ym} עודכן")
         except Exception as e:
             logger.exception("forecast_events save failed")
             QMessageBox.critical(self, "שגיאה", f"{type(e).__name__}: {e}")
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Audit log viewer
-# ============================================================
+# ────────────────────────────────────────────────
 class _AuditPanel(QWidget):
     TABLE_LABELS = {
         'customer_repair_prices':      'מחיר תיקון ללקוח',
@@ -605,9 +605,9 @@ class _AuditPanel(QWidget):
         return ', '.join(f"{k}={v}" for k, v in d.items())
 
 
-# ============================================================
+# ────────────────────────────────────────────────
 #  Main UpdatesTab
-# ============================================================
+# ────────────────────────────────────────────────
 class UpdatesTab(QWidget):
     def __init__(self):
         super().__init__()

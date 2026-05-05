@@ -115,7 +115,7 @@ def forecast_arima(series: pd.Series, horizon: int,
         ci     = fc.conf_int(alpha=0.2)
         return _result_df(months, pred, ci.iloc[:,0].values, ci.iloc[:,1].values)
     except Exception as e:
-        logger.exception("ARIMA failed (n=%d horizon=%d): %s — נופל ל-MA(6)", len(y), horizon, e)
+        logger.exception("ARIMA failed (n=%d horizon=%d): %s, falling back to MA(6)", len(y), horizon, e)
         avg = float(np.mean(y[-6:]))
         df = _result_df(months, np.full(horizon, avg))
         df.attrs['fallback'] = f"ARIMA: {type(e).__name__}: {e}"
@@ -356,7 +356,7 @@ def run_all_models(series: pd.Series, horizon: int,
     logger.info("run_all_models: n=%d horizon=%d context=%s", len(series), horizon, context)
 
     # שימוש ב-forecast_cache עוקף אימון אם הקלטים זהים לריצה קודמת.
-    # אם המטמון לא זמין (למשל בייבוא ראשוני/ביצוע מבדיקות) — נופל למימושים הישירים.
+    # אם המטמון לא זמין (למשל בייבוא ראשוני/ביצוע מבדיקות), נופל למימושים הישירים.
     try:
         from forecast_cache import cached_arima, cached_prophet, cached_xgboost
         _arima_fn   = cached_arima

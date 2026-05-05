@@ -86,7 +86,7 @@ class ForecastWorker(QThread):
                     res['run_id'] = run_id
             except Exception as ev_err:
                 logger.exception("forecast evaluation/persistence failed")
-                # ממשיכים גם אם backtest/save נכשלו — לא לחסום את התחזית עצמה.
+                # ממשיכים גם אם backtest/save נכשלו, לא לחסום את התחזית עצמה.
                 res.setdefault('metrics', {})
 
             self.finished.emit(res)
@@ -1142,7 +1142,7 @@ class ForecastTab(QWidget):
             lbl.setText(str(nv.get(k,'—')))
 
     def _fill_desc(self, descs, metrics: dict | None = None):
-        """מציג תיאור לכל מודל, ואם יש metrics מ-backtest — שורת אמינות צמודה."""
+        """מציג תיאור לכל מודל, ואם יש metrics מ-backtest, שורת אמינות צמודה."""
         lmap = {'arima':'ARIMA','prophet':'Prophet','xgboost':'XGBoost','newsvendor':'Newsvendor'}
         metrics = metrics or {}
         parts = []

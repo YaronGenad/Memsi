@@ -3,7 +3,7 @@
 unidentified_products_tab.py
 - מייצא לקובץ CSV את המוצרים שעדיין אין להם זיהוי קטגוריה
 - מאפשר לטעון CSV מעודכן עם 'דרגת מותג / גודל / חומר' ולכתוב אותם ישירות ל-DB
-  (luggage_identification table) — לא יותר שכתוב של product_identification.py.
+  (luggage_identification table) - לא יותר שכתוב של product_identification.py.
 """
 import pandas as pd
 from qtpy.QtWidgets import (
@@ -171,7 +171,7 @@ class UnidentifiedProductsTab(QWidget):
             )
             QMessageBox.information(
                 self, "הצלחה",
-                f"עודכנו {updates} מוצרים.\nהשינויים נכנסים לתוקף מיידית — אין צורך להפעיל מחדש."
+                f"עודכנו {updates} מוצרים.\nהשינויים נכנסים לתוקף מיידית - אין צורך להפעיל מחדש."
             )
         except Exception as e:
             self.status_text.append(f"\nשגיאה: {e}")

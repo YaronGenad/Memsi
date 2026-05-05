@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-002_seed_from_code.py — מעביר את ה-domain data מקבצי הקוד הקיימים
+002_seed_from_code.py - מעביר את ה-domain data מקבצי הקוד הקיימים
 (pricing_data.py, branch_names.py, warehouse_config.py,
 product_identification.py) לטבלאות שנוצרו ב-001.
 
@@ -25,7 +25,7 @@ SEED_USER = 'seed:002'
 def run(conn):
     cur = conn.cursor()
 
-    # 1) pricing_tiers — כל ה-keys מ-REPAIR_PRICING ∪ REPLACEMENT_PRICING
+    # 1) pricing_tiers - כל ה-keys מ-REPAIR_PRICING ∪ REPLACEMENT_PRICING
     tiers = set(REPAIR_PRICING.keys()) | set(REPLACEMENT_PRICING.keys())
     for t in sorted(tiers):
         cur.execute("""
@@ -33,7 +33,7 @@ def run(conn):
             VALUES (%s, %s) ON CONFLICT (code) DO NOTHING
         """, (t, SEED_USER))
 
-    # 2) customers — מ-CUSTOMER_REPAIR_PRICING (זהה ל-REPLACEMENT לפי הבדיקה)
+    # 2) customers - מ-CUSTOMER_REPAIR_PRICING (זהה ל-REPLACEMENT לפי הבדיקה)
     customers = dict(CUSTOMER_REPAIR_PRICING)
     customers.update(CUSTOMER_REPLACEMENT_PRICING)  # למקרה של חוסר התאמה
     for code, tier in customers.items():
@@ -42,7 +42,7 @@ def run(conn):
             VALUES (%s, %s, %s) ON CONFLICT (code) DO NOTHING
         """, (code, tier, SEED_USER))
 
-    # 3) customer_repair_prices — שטוח: tier × sku → price
+    # 3) customer_repair_prices: tier x sku => price
     for tier, prices in REPAIR_PRICING.items():
         for sku, price in prices.items():
             cur.execute("""
@@ -84,7 +84,7 @@ def run(conn):
             VALUES (%s, %s, %s) ON CONFLICT (code) DO NOTHING
         """, (code, name, SEED_USER))
 
-    # 8) warehouses — APPROVED_WAREHOUSES כולל גם "לא פעיל" בשם.
+    # 8) warehouses - APPROVED_WAREHOUSES כולל גם "לא פעיל" בשם.
     # מסמן is_active = False אם הטקסט מכיל "לא פעיל".
     for code, name in APPROVED_WAREHOUSES.items():
         is_active = 'לא פעיל' not in (name or '') and not name.startswith('***')
@@ -95,7 +95,7 @@ def run(conn):
             ON CONFLICT (code) DO NOTHING
         """, (code, name, is_active, SEED_USER))
 
-    # 9) luggage_identification — flat dict: description → category
+    # 9) luggage_identification: description => category
     seen = set()
     for category, descriptions in LUGGAGE_IDENTIFICATION.items():
         for desc in descriptions:
