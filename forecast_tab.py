@@ -21,6 +21,7 @@ from matplotlib.figure import Figure
 from forecast_db import ForecastDB
 from forecast_engine import run_all_models, forecast_arima, forecast_prophet, forecast_xgboost, newsvendor_order
 from branch_names import get_display_label
+from logger import logger
 
 try:
     from bidi.algorithm import get_display as _bidi
@@ -41,10 +42,14 @@ class ForecastWorker(QThread):
     finished = pyqtSignal(dict)
     error    = pyqtSignal(str)
 
-    def __init__(self, series, horizon, events_df, context):
+    def __init__(self, series, horizon, events_df, context,
+                 branches=None, categories=None, persist=True):
         super().__init__()
         self.series = series; self.horizon = horizon
         self.events_df = events_df; self.context = context
+        self.branches = branches or []
+        self.categories = categories or []
+        self.persist = persist
 
     def run(self):
         try:
@@ -57,9 +62,40 @@ class ForecastWorker(QThread):
             old = sys.stdout; sys.stdout = _Emit(self.progress)
             res = run_all_models(self.series, self.horizon, self.events_df, self.context)
             sys.stdout = old
+
+            # Backtest על 6 חודשים אחרונים (אם יש מספיק נתונים)
+            metrics = {}
+            try:
+                from forecast_evaluation import backtest, save_run
+                self.progress.emit("מחשב אמינות מודלים על היסטוריה…")
+                metrics = backtest(self.series, self.events_df, self.context,
+                                   test_size=6)
+                res['metrics'] = metrics
+
+                if self.persist:
+                    self.progress.emit("שומר ריצה ב-DB…")
+                    run_id = save_run(
+                        branches=self.branches,
+                        categories=self.categories,
+                        horizon_months=self.horizon,
+                        context=self.context,
+                        series_n=len(self.series),
+                        results=res,
+                        metrics=metrics,
+                    )
+                    res['run_id'] = run_id
+            except Exception as ev_err:
+                logger.exception("forecast evaluation/persistence failed")
+                # ממשיכים גם אם backtest/save נכשלו — לא לחסום את התחזית עצמה.
+                res.setdefault('metrics', {})
+
             self.finished.emit(res)
         except Exception:
-            import traceback; self.error.emit(traceback.format_exc())
+            import traceback
+            tb = traceback.format_exc()
+            logger.exception("ForecastWorker failed: n=%d horizon=%d ctx=%s",
+                             len(self.series), self.horizon, self.context)
+            self.error.emit(tb)
 
 
 class ProcurementWorker(QThread):
@@ -97,7 +133,11 @@ class ProcurementWorker(QThread):
                 }
             self.finished.emit(out)
         except Exception:
-            import traceback; self.error.emit(traceback.format_exc())
+            import traceback
+            tb = traceback.format_exc()
+            logger.exception("ProcurementWorker failed: rows=%d ctx=%s",
+                             len(self.hist_df), self.context)
+            self.error.emit(tb)
 
 
 # ════════════════════════════════════════════════
@@ -299,7 +339,11 @@ class BranchSnapshotWorker(QThread):
             sys.stdout = old
             self.finished.emit(out)
         except Exception:
-            import traceback; self.error.emit(traceback.format_exc())
+            import traceback
+            tb = traceback.format_exc()
+            logger.exception("BranchSnapshotWorker failed: n_total=%d rows=%d ctx=%s",
+                             len(self.series_total), len(self.hist_df), self.context)
+            self.error.emit(tb)
 
 
 # ════════════════════════════════════════════════
@@ -960,7 +1004,8 @@ class ForecastTab(QWidget):
         self.progress_bar.setVisible(True)
 
         self._worker = ForecastWorker(
-            self._series, horizon, self.fdb.get_events(), self._build_context())
+            self._series, horizon, self.fdb.get_events(), self._build_context(),
+            branches=codes, categories=cats, persist=True)
         self._worker.progress.connect(self.status_label.setText)
         self._worker.finished.connect(self._on_forecast_done)
         self._worker.error.connect(self._on_error)
@@ -1036,8 +1081,10 @@ class ForecastTab(QWidget):
         self.fc_chart.plot(self._series, results)
         self._fill_fc_table(results)
         self._fill_nv(results.get('newsvendor', {}))
-        self._fill_desc(results.get('descriptions', {}))
-        self.status_label.setText("הושלם ✓")
+        self._fill_desc(results.get('descriptions', {}), results.get('metrics', {}))
+        run_id = results.get('run_id')
+        suffix = f"  ·  run #{run_id}" if run_id else ''
+        self.status_label.setText(f"הושלם ✓{suffix}")
 
         issues = self._validate_forecast_data(results)
         if issues:
@@ -1094,13 +1141,29 @@ class ForecastTab(QWidget):
         for k, lbl in self.nv_vals.items():
             lbl.setText(str(nv.get(k,'—')))
 
-    def _fill_desc(self, descs):
+    def _fill_desc(self, descs, metrics: dict | None = None):
+        """מציג תיאור לכל מודל, ואם יש metrics מ-backtest — שורת אמינות צמודה."""
         lmap = {'arima':'ARIMA','prophet':'Prophet','xgboost':'XGBoost','newsvendor':'Newsvendor'}
-        html = ''.join(
-            f'<b style="color:#2c3e50;">{lmap.get(m,m)}:</b> '
-            f'<span style="color:#555;">{d}</span><br>'
-            for m, d in descs.items())
-        self.fc_desc.setHtml(html)
+        metrics = metrics or {}
+        parts = []
+        for m, d in descs.items():
+            parts.append(
+                f'<b style="color:#2c3e50;">{lmap.get(m,m)}:</b> '
+                f'<span style="color:#555;">{d}</span>'
+            )
+            mk = metrics.get(m)
+            if mk and mk.get('mae') is not None:
+                mae = mk['mae']
+                mape = mk.get('mape')
+                accuracy = (
+                    f' &nbsp;·&nbsp; <span style="color:#888;">'
+                    f'אמינות (test {mk["test_n"]}חודשים): MAE ±{mae:.0f}'
+                    + (f', MAPE {mape:.1f}%' if mape is not None else '')
+                    + '</span>'
+                )
+                parts.append(accuracy)
+            parts.append('<br>')
+        self.fc_desc.setHtml(''.join(parts))
 
     # ────────────────────────────────────────────
     #  תכנון רכש (Tab 5)

@@ -35,11 +35,23 @@ CREATE TABLE IF NOT EXISTS forecast_events (
 
 class ForecastDB:
     def __init__(self):
-        self.conn = psycopg2.connect(**DB_CONFIG)
+        self._conn = psycopg2.connect(**DB_CONFIG)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
+    @property
+    def conn(self):
+        if self._conn is None or self._conn.closed:
+            self._conn = psycopg2.connect(**DB_CONFIG)
+        return self._conn
 
     def close(self):
-        if self.conn and not self.conn.closed:
-            self.conn.close()
+        if self._conn and not self._conn.closed:
+            self._conn.close()
 
     def setup_tables(self):
         """יצירת טבלאות אם לא קיימות + טעינת אירועים מ-CSV"""

@@ -174,22 +174,33 @@ REPAIR_PRICING = {
 
 def get_repair_price(customer_id, part_name):
     """
-    מחזיר מחיר תיקון עבור לקוח ומק"ט
+    מחזיר מחיר תיקון עבור לקוח ומק"ט.
+    קורא מה-DB דרך domain_repository; אם ה-DB לא זמין נופל ל-dict-ים בקובץ.
     """
+    try:
+        from domain_repository import get_repair_price as _db_get
+        val = _db_get(customer_id, part_name)
+        if val is not None:
+            return val
+    except Exception:
+        pass
     pricing_type = CUSTOMER_REPAIR_PRICING.get(customer_id)
     if not pricing_type:
         return None
-    
     pricing_table = REPAIR_PRICING.get(pricing_type)
     if not pricing_table:
         return None
-    
     return pricing_table.get(part_name)
 
 def is_repair_item(part_name):
     """
-    בודק אם מק"ט הוא פריט תיקון
+    בודק אם מק"ט הוא פריט תיקון.
     """
+    try:
+        from domain_repository import is_repair_item as _db_is
+        return _db_is(part_name)
+    except Exception:
+        pass
     for pricing_table in REPAIR_PRICING.values():
         if part_name in pricing_table:
             return True
@@ -314,16 +325,22 @@ REPLACEMENT_PRICING = {
 
 def get_replacement_price(customer_id, luggage_type):
     """
-    מחזיר מחיר החלפה עבור לקוח וסוג מזוודה
+    מחזיר מחיר החלפה עבור לקוח וסוג מזוודה.
+    קורא מה-DB דרך domain_repository; אם ה-DB לא זמין נופל ל-dict-ים בקובץ.
     """
+    try:
+        from domain_repository import get_replacement_price as _db_get
+        val = _db_get(customer_id, luggage_type)
+        if val is not None:
+            return val
+    except Exception:
+        pass
     pricing_type = CUSTOMER_REPLACEMENT_PRICING.get(customer_id)
     if not pricing_type:
         return None
-    
     pricing_table = REPLACEMENT_PRICING.get(pricing_type)
     if not pricing_table:
         return None
-    
     return pricing_table.get(luggage_type)
 
 # מחירוני תשלום לספקים
@@ -379,8 +396,16 @@ SUPPLIER_REPAIR_PRICING = {
 
 def get_supplier_payment(part_name, luggage_type, quantity):
     """
-    מחזיר תשלום לספק עבור תיקון או החלפה
+    מחזיר תשלום לספק עבור תיקון או החלפה.
+    קורא מה-DB דרך domain_repository; אם ה-DB לא זמין נופל ל-dict-ים בקובץ.
     """
+    try:
+        from domain_repository import get_supplier_payment as _db_get
+        val = _db_get(part_name, luggage_type, quantity)
+        if val is not None:
+            return val
+    except Exception:
+        pass
     if is_repair_item(part_name):
         price = SUPPLIER_REPAIR_PRICING.get(part_name)
         return price * quantity if price else None

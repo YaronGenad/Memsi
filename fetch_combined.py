@@ -20,10 +20,14 @@ _BASE_URL     = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.
 DOCUMENTS_URL = f"{_BASE_URL}/DOCUMENTS_D"
 LOGFILE_URL   = f"{_BASE_URL}/LOGFILE"
 
+# Priority OData עלול להיות איטי תחת עומס; timeout של 30s היה קצר מדי
+# וגרם ל-ReadTimeout. עכשיו 120s עם 5 ניסיונות.
+ODATA_TIMEOUT = int(os.environ.get('PRIORITY_TIMEOUT', 120))
+
 _RETRY = retry(
     retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=4, max=30),
     reraise=True,
 )
 
@@ -34,8 +38,9 @@ TARGET_CUSTOMERS = [
     '360250030', '360250038', '360250039', '360190002', '360250033'
 ]
 
-def _fetch_odata_all(url: str, params: dict) -> list:
-    """שולף כל הדפים מ-OData endpoint עם $top/$skip pagination."""
+def _fetch_odata_all(url: str, params: dict, progress=None) -> list:
+    """שולף כל הדפים מ-OData endpoint עם $top/$skip pagination.
+    progress: callable(str) אופציונלי לעדכוני התקדמות."""
     headers = {"Authorization": AUTH_HEADER}
     all_records = []
     params = dict(params)
@@ -44,7 +49,7 @@ def _fetch_odata_all(url: str, params: dict) -> list:
 
     @_RETRY
     def _page(p):
-        r = requests.get(url, headers=headers, params=p, timeout=30)
+        r = requests.get(url, headers=headers, params=p, timeout=ODATA_TIMEOUT)
         if r.status_code != 200:
             logger.error("OData %s HTTP %s: %s", url, r.status_code, r.text[:300])
             raise Exception(f"HTTP {r.status_code}: {r.text[:200]}")
@@ -53,6 +58,8 @@ def _fetch_odata_all(url: str, params: dict) -> list:
     while True:
         batch = _page(params)
         all_records.extend(batch)
+        if progress:
+            progress(f"  {url.rsplit('/', 1)[-1]}: {len(all_records):,} רשומות…")
         if len(batch) < 1000:
             break
         params['$skip'] += 1000
@@ -61,26 +68,26 @@ def _fetch_odata_all(url: str, params: dict) -> list:
     return all_records
 
 
-def fetch_documents(start_date, end_date):
+def fetch_documents(start_date, end_date, progress=None):
     customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in TARGET_CUSTOMERS])
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})"
     }
-    records = _fetch_odata_all(DOCUMENTS_URL, params)
+    records = _fetch_odata_all(DOCUMENTS_URL, params, progress=progress)
     logger.info("fetch_documents %s→%s: %d records", start_date, end_date, len(records))
     return records
 
 
-def fetch_logfile(start_date, end_date):
+def fetch_logfile(start_date, end_date, progress=None):
     customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in TARGET_CUSTOMERS])
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})"
     }
-    records = _fetch_odata_all(LOGFILE_URL, params)
+    records = _fetch_odata_all(LOGFILE_URL, params, progress=progress)
     logger.info("fetch_logfile %s→%s: %d records", start_date, end_date, len(records))
     return records
 
-def fetch_with_cache(start_date, end_date):
+def fetch_with_cache(start_date, end_date, progress=None):
     """
     משיך נתונים עם שימוש ב-cache
     אם הנתונים קיימים ב-cache - מחזיר משם
@@ -100,14 +107,20 @@ def fetch_with_cache(start_date, end_date):
         month_end = f"{year}-{month:02d}-{last_day}"
         
         logger.info("fetch_with_cache: pulling %s from API", year_month)
-        
+        if progress:
+            progress(f"מושך {year_month}…")
+
         if year_month in missing_docs:
-            docs = fetch_documents(month_start, month_end)
+            docs = fetch_documents(month_start, month_end, progress=progress)
+            if progress:
+                progress(f"שומר {len(docs)} מסמכים ל-cache…")
             cache.save_documents(docs, year_month)
             cache.update_metadata('documents', year_month, month_start, month_end, len(docs))
-        
+
         if year_month in missing_logs:
-            logs = fetch_logfile(month_start, month_end)
+            logs = fetch_logfile(month_start, month_end, progress=progress)
+            if progress:
+                progress(f"שומר {len(logs)} תנועות ל-cache…")
             cache.save_logfile(logs, year_month)
             cache.update_metadata('logfile', year_month, month_start, month_end, len(logs))
     

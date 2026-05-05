@@ -114,10 +114,12 @@ def forecast_arima(series: pd.Series, horizon: int,
         pred   = fc.predicted_mean
         ci     = fc.conf_int(alpha=0.2)
         return _result_df(months, pred, ci.iloc[:,0].values, ci.iloc[:,1].values)
-    except Exception:
-        # fallback: ממוצע נע פשוט
+    except Exception as e:
+        logger.exception("ARIMA failed (n=%d horizon=%d): %s — נופל ל-MA(6)", len(y), horizon, e)
         avg = float(np.mean(y[-6:]))
-        return _result_df(months, np.full(horizon, avg))
+        df = _result_df(months, np.full(horizon, avg))
+        df.attrs['fallback'] = f"ARIMA: {type(e).__name__}: {e}"
+        return df
 
 
 # ────────────────────────────────────────────────
@@ -352,14 +354,25 @@ def run_all_models(series: pd.Series, horizon: int,
     results = {}
 
     logger.info("run_all_models: n=%d horizon=%d context=%s", len(series), horizon, context)
+
+    # שימוש ב-forecast_cache עוקף אימון אם הקלטים זהים לריצה קודמת.
+    # אם המטמון לא זמין (למשל בייבוא ראשוני/ביצוע מבדיקות) — נופל למימושים הישירים.
+    try:
+        from forecast_cache import cached_arima, cached_prophet, cached_xgboost
+        _arima_fn   = cached_arima
+        _prophet_fn = cached_prophet
+        _xgboost_fn = cached_xgboost
+    except Exception:
+        _arima_fn, _prophet_fn, _xgboost_fn = forecast_arima, forecast_prophet, forecast_xgboost
+
     print("  מריץ ARIMA...")
-    results['arima']   = forecast_arima(series, horizon, events_df, context)
+    results['arima']   = _arima_fn(series, horizon, events_df, context)
 
     print("  מריץ Prophet...")
-    results['prophet'] = forecast_prophet(series, horizon, events_df, context)
+    results['prophet'] = _prophet_fn(series, horizon, events_df, context)
 
     print("  מריץ XGBoost...")
-    results['xgboost'] = forecast_xgboost(series, horizon, events_df, context)
+    results['xgboost'] = _xgboost_fn(series, horizon, events_df, context)
 
     # Newsvendor על ממוצע שלושת המודלים
     combined = (results['arima']['forecast'].values +

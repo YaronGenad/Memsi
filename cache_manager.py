@@ -66,21 +66,32 @@ class CacheManager:
         cursor.close()
     
     def save_logfile(self, logfile_records, year_month):
-        """שמירת תנועות ב-cache"""
+        """שמירת תנועות ב-cache.
+        מדלג על שורות בלי LOGDOCNO (ה-unique index הוא partial WHERE logdocno IS NOT NULL).
+        """
         if not logfile_records:
             return
-        
+
         conn = self.connect()
         cursor = conn.cursor()
-        
+
+        skipped = 0
         for log in logfile_records:
+            logdocno = log.get('LOGDOCNO')
+            if logdocno is None or logdocno == '':
+                skipped += 1
+                continue
+            # ה-WHERE כאן חייב להיות זהה ל-WHERE של ה-partial unique index
+            # ב-db_setup.py (uq_logfile_row), אחרת PostgreSQL לא יזהה אותו ל-ON CONFLICT.
             cursor.execute("""
                 INSERT INTO logfile (logdocno, curdate, partname, topartdes,
                                     tquant, ucost, custname)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (logdocno, partname, topartdes, tquant, ucost, curdate) DO NOTHING
+                ON CONFLICT (logdocno, partname, topartdes, tquant, ucost, curdate)
+                  WHERE logdocno IS NOT NULL
+                  DO NOTHING
             """, (
-                log.get('LOGDOCNO'),
+                logdocno,
                 log.get('CURDATE'),
                 log.get('PARTNAME'),
                 log.get('TOPARTDES'),
@@ -88,9 +99,12 @@ class CacheManager:
                 log.get('UCOST'),
                 log.get('CUSTNAME')
             ))
-        
+
         conn.commit()
         cursor.close()
+        if skipped:
+            from logger import logger
+            logger.info("save_logfile: skipped %d rows with null LOGDOCNO", skipped)
     
     def update_metadata(self, data_type, year_month, start_date, end_date, count):
         """עדכון מטא-דאטה"""

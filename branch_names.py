@@ -41,13 +41,23 @@ BRANCH_NAMES = {
 
 
 def get_branch_name(code: str) -> str:
-    """מחזיר שם תצוגה לקוד סניף, או את הקוד עצמו אם לא נמצא מיפוי"""
-    return BRANCH_NAMES.get(str(code).strip(), str(code))
+    """מחזיר שם תצוגה לקוד סניף, או את הקוד עצמו אם לא נמצא מיפוי.
+    קורא מה-DB; נופל לקובץ במקרה של תקלה."""
+    try:
+        from domain_repository import get_branch_name as _db_get
+        return _db_get(code)
+    except Exception:
+        return BRANCH_NAMES.get(str(code).strip(), str(code))
 
 
 def get_display_label(code: str) -> str:
-    """מחזיר 'שם (קוד)' אם יש שם, אחרת רק הקוד"""
-    name = BRANCH_NAMES.get(str(code).strip())
-    if name:
-        return f"{name} ({code})"
-    return str(code)
+    """מחזיר 'שם (קוד)' אם יש שם, אחרת רק הקוד.
+    קורא מה-DB; נופל לקובץ במקרה של תקלה."""
+    try:
+        from domain_repository import get_display_label as _db_get
+        return _db_get(code)
+    except Exception:
+        name = BRANCH_NAMES.get(str(code).strip())
+        if name:
+            return f"{name} ({code})"
+        return str(code)

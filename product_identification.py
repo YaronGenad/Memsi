@@ -1,6 +1,6 @@
-# זיהוי מוצרים
+# -*- coding: utf-8 -*-
+import re as _re
 
-# מיפוי תיאורי מוצרים לזיהוי מזוודה
 LUGGAGE_IDENTIFICATION = {
     "טרולי קלאסית קשיחה": [
         "מזוודה קשיחה S (לא מותג)",
@@ -32,7 +32,8 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה קשיחה 20' מתרחבת Travel Club S תכלת",
         "מזוודה קשיחה \"20 TC עם מנעול TSA-נייבי, S",
         "מזוודה קשיחה \"20 TC עם מנעול TSA-שחור, S",
-        "מזוודה קשיחה \"20 TC +מנעול TSA-רוז ros gold, S"
+        "מזוודה קשיחה \"20 TC +מנעול TSA-רוז ros gold, S",
+        "מזוודה קשיחה 20\" מתרחבות TC QUARTZ PC-כסף-S"
     ],
     "טרולי קלאסית רכה": [
         "מזוודה רכה מתרחבת 20' TRAVEL CLUB",
@@ -50,7 +51,10 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה רכה 20 אינץ TRAVEL CLUB-שחור/טורקיז-00",
         "מזוודה רכה SUPER LIGHT 20' Travel Club-שחור-S",
         "מזוודה רכה מתרחבת 2 גלגלים 20' Travel Club-שחור-S",
-        "תיק נסיעה על גלגלים 20' Travel Club-נייבי-00"
+        "תיק נסיעה על גלגלים 20' Travel Club-נייבי-00",
+        "מזוודה SUPPER LIGHT Travel Club-שחור/צהוב-S",
+        "מזוודה SUPPER LIGHT Travel Club-נייבי/צהוב-S",
+        "מזוודה SUPPER LIGHT Travel Club-ירוק זית/צהוב-S"
     ],
     "בינונית קלאסית קשיחה": [
         "מזוודה קשיחה M (לא מותג)",
@@ -68,7 +72,8 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה קשיחה \"26 TC עם מנעול TSA-ירוק זית, M",
         "מזוודה קשיחה \"26 TC +מנעול TSA-רוז ros gold, M",
         "מזוודה קשיחה \"26 TC עם מנעול TSA-חאקי, M",
-        "מזוודה קשיחה \"26 TC עם מנעול TSA-נייבי, M"
+        "מזוודה קשיחה \"26 TC עם מנעול TSA-נייבי, M",
+        "מזוודה קשיחה 25\" מתרחבות TC QUARTZ PC-כסף-M"
     ],
     "בינונית קלאסית בד": [
         "מזוודה בד M (לא מותג)",
@@ -111,7 +116,8 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה קשיחה 28' מתרחבת Travel Club L, כתום",
         "מזוודה קשיחה 28' מתרחבת Travel Club M שמפניה",
         "מזוודה קשיחה 28' מתרחבת Travel Club M רוז גולד",
-        "מזוודה קשיחה 28' מתרחבת Travel Club L, שחור"
+        "מזוודה קשיחה 28' מתרחבת Travel Club L, שחור",
+        "מזוודה קשיחה 29\" PP LC ONYX-שחור-L"
     ],
     "גדולה קלאסית רכה": [
         "מזוודה בד L (לא מותג)",
@@ -130,7 +136,9 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה SUPPER LIGHT Travel Club-אפור/צהוב-L",
         "מזוודה SUPPER LIGHT Travel Club-ירוק זית/צהוב -L",
         "מזוודה SUPPER LIGHT Travel Club-נייבי/צהוב-L",
-        "מזוודה SUPPER LIGHT Travel Club-שחור/צהוב-L"
+        "מזוודה SUPPER LIGHT Travel Club-שחור/צהוב-L",
+        "מזוודה רכה 29' TC-נייבי-L",
+        "מזוודה רכה 29' TC-שחור-L"
     ],
     "טרולי מותג על קשיחה": [
         "מזוודה 20' טרולי קשיחה מתרחבת JEEP-כחול-00",
@@ -245,7 +253,8 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה קשיחה מתרחבת  DYNAMIIC-דנים-L",
         "מזוודה קשיחה מתרחבת  DYNAMIIC-ירוק-L",
         "מזוודה קשיחה L BINALONG-ורוד רוז-28\"",
-        "מזוודה קשיחה אקסטרה גדולה 82 ס\"מ Lagos-כסף-XL"
+        "מזוודה קשיחה אקסטרה גדולה 82 ס\"מ Lagos-כסף-XL",
+        "מזוודה קשיחה סמסונייט אסנס 28\"-אדום פחם-00"
     ],
     "ענקית מותג על קשיחה": [
         "LOGODUCK + TROLLEY XL EXP P10SZV35",
@@ -297,7 +306,8 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה רכה 29' AIRES-נייבי-L",
         "מזוודה רכה 29' AIRES-שחור-L",
         "מזוודה רכה 29' TC-אפור-L",
-        "מזוודה רכה 29' TC-ירוק פיקוק-L"
+        "מזוודה רכה 29' TC-ירוק פיקוק-L",
+        "מזוודת בד 28\" KIIP EVOLUTION-טורקיז-L"
     ],
     "ענקית מותג רכה": [
         "מזוודה בד XL (מותג)",
@@ -329,7 +339,10 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה קשיחה 29\" מתרחבות TC QUARTZ PC-נייבי-L",
         "מזוודה קשיחה 29\" מתרחבות TC QUARTZ PC-פטרול-L",
         "מזוודה קשיחה 29\" מתרחבות TC QUARTZ PC-רוז גולד-L",
-        "מזוודה קשיחה 29\" מתרחבות TC QUARTZ PC-שחור-L"
+        "מזוודה קשיחה 29\" מתרחבות TC QUARTZ PC-שחור-L",
+        "מזוודה קשיחה 29\" PP LC ONYX-נייבי-L",
+        "מזוודה קשיחה 29\" PP LC ONYX-אפור-L",
+        "מזוודה קשיחה 29\" PP LC ONYX-ירוק ג'ייד-L"
     ],
     "ענקית קלאסית קשיחה": [
         "מזוודה קשיחה XL (לא מותג)",
@@ -349,7 +362,8 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה קשיחה 32' מתרחבת Travel Club XL ירוק מנטה",
         "מזוודה רכה מתרחבת 2 גלגלים 32' Travel Club-שחור-XL",
         "מזוודה רכה מתרחבת 32 אינצ  Travel Club-נייבי/כתום-XL",
-        "מזוודה קשיחה \"30 TC עם מנעול TSA-שחור, L"
+        "מזוודה קשיחה \"30 TC עם מנעול TSA-שחור, L",
+        "מזוודה קשיחה \"30 TC עם מנעול TSA-נייבי, L"
     ],
     "טרולי מותג רכה": [
         "מזוודה בד S (מותג)",
@@ -367,7 +381,8 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה רכה מתרחבת 20' דגם FASCIA",
         "תיק נסיעה על גלגלים 55 ס\"מ BASICS-שחור-00",
         "מזוודה רכה 20' AIRES-נייבי-S",
-        "מזוודה רכה 20' TC-שחור-S"
+        "מזוודה רכה 20' TC-שחור-S",
+        "תיק 00-Dark Anthracite-Antarctic Weekender"
     ],
     "ענקית מותג על רכה": [
         "מזוודה רכה 32' מתרחבת 82 ס\"מ CARACAS",
@@ -445,7 +460,8 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה קשיחה 25\" מתרחבות TC QUARTZ PC-ירוק זית-M",
         "מזוודה קשיחה 25\" מתרחבות TC QUARTZ PC-פטרול-M",
         "מזוודה קשיחה 25\" מתרחבות TC QUARTZ PC-רוז גולד-M",
-        "מזוודה קשיחה 25\" מתרחבות TC QUARTZ PC-שחור-M"
+        "מזוודה קשיחה 25\" מתרחבות TC QUARTZ PC-שחור-M",
+        "מזוודה קשיחה מתרחבת  DYNAMIIC-דנים-M"
     ],
     "ענקית מותג קשיחה": [
         "מזוודה קשיחה מתרחבת 30' דגם SPONTANEOUS II",
@@ -519,29 +535,21 @@ LUGGAGE_IDENTIFICATION = {
         "מזוודה רכה מתרחבת 26\" Travel Club כחול טיל/כתום M",
         "מזוודה רכה מתרחבת 26\" Travel Club שחור M",
         "מזוודה SUPPER LIGHT Travel Club-אפור/צהוב-M",
-        "מזוודה SUPPER LIGHT Travel Club-נייבי/צהוב-M"
+        "מזוודה SUPPER LIGHT Travel Club-נייבי/צהוב-M",
+        "מזוודה רכה 26' TC-שחור-M",
+        "מזוודה SUPPER LIGHT Travel Club-ירוק זית/צהוב-M"
     ]
 }
 
-import re as _re
-
-# בנה מפה: pattern מנורמל → luggage_type — פעם אחת בטעינת המודול
-# סדר לפי אורך יורד כדי שדפוסים ארוכים וספציפיים ינצחו קצרים
-_PATTERNS: list[tuple[_re.Pattern, str]] = sorted(
-    [
-        (_re.compile(_re.escape(' '.join(desc.split())), _re.IGNORECASE), luggage_type)
-        for luggage_type, descs in LUGGAGE_IDENTIFICATION.items()
-        for desc in descs
-    ],
+_PATTERNS = sorted(
+    [(_re.compile(_re.escape(' '.join(desc.split())), _re.IGNORECASE), lt)
+     for lt, descs in LUGGAGE_IDENTIFICATION.items() for desc in descs],
     key=lambda t: -len(t[0].pattern),
 )
 
-
 def identify_luggage(product_description):
-    if not product_description:
-        return None
+    if not product_description: return None
     clean_desc = ' '.join(product_description.split())
     for pattern, luggage_type in _PATTERNS:
-        if pattern.search(clean_desc):
-            return luggage_type
+        if pattern.search(clean_desc): return luggage_type
     return None
