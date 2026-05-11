@@ -53,15 +53,10 @@ class ForecastWorker(QThread):
 
     def run(self):
         try:
-            import io, sys
-            class _Emit:
-                def __init__(self, s): self.s = s
-                def write(self, t):
-                    if t.strip(): self.s.emit(t.strip())
-                def flush(self): pass
-            old = sys.stdout; sys.stdout = _Emit(self.progress)
-            res = run_all_models(self.series, self.horizon, self.events_df, self.context)
-            sys.stdout = old
+            res = run_all_models(
+                self.series, self.horizon, self.events_df, self.context,
+                progress_callback=self.progress.emit,
+            )
 
             # Backtest על 6 חודשים אחרונים (אם יש מספיק נתונים)
             metrics = {}
@@ -307,18 +302,12 @@ class BranchSnapshotWorker(QThread):
 
     def run(self):
         try:
-            import io, sys
-            class _Emit:
-                def __init__(self, s): self.s = s
-                def write(self, t):
-                    if t.strip(): self.s.emit(t.strip())
-                def flush(self): pass
-            old = sys.stdout; sys.stdout = _Emit(self.progress)
-
             out = {}
             self.progress.emit("מריץ מודלים כלליים…")
             out['total'] = run_all_models(
-                self.series_total, 6, self.events_df, self.context)
+                self.series_total, 6, self.events_df, self.context,
+                progress_callback=self.progress.emit,
+            )
 
             by_cat = {}
             cats = sorted(self.hist_df['luggage_type'].unique())
@@ -336,7 +325,6 @@ class BranchSnapshotWorker(QThread):
                 by_cat[cat] = {'arima': ar6, 'xgboost': xg6, 'avg': avg}
             out['by_cat'] = by_cat
 
-            sys.stdout = old
             self.finished.emit(out)
         except Exception:
             import traceback

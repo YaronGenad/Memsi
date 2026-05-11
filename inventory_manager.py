@@ -4,18 +4,29 @@ import pandas as pd
 from datetime import date
 from dateutil.relativedelta import relativedelta
 from db_config import get_conn
+from errors import ConfigError, TransientNetworkError
+from logger import logger
 
 import os
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # הערה: load_dotenv כבר רץ ב-db_config.py בעת import. אין צורך לקרוא לו שוב.
 
-AUTH_HEADER = os.environ['PRIORITY_AUTH_HEADER']
+
+def _auth_header() -> str:
+    h = os.environ.get('PRIORITY_AUTH_HEADER')
+    if not h:
+        raise ConfigError(
+            "PRIORITY_AUTH_HEADER לא מוגדר. ערוך את .env והגדר את המשתנה."
+        )
+    return h
+
+
 _BASE_URL   = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema')
 PARTBAL_URL = f"{_BASE_URL}/PARTBAL"
 
 _RETRY = retry(
-    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout, TransientNetworkError)),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     reraise=True,
@@ -49,7 +60,7 @@ def fetch_partbal_inventory(warehouse_filter=None, progress_callback=None):
     מסנן לפי מחסנים נבחרים (מחרוזות כמו '05', '12') אם סופק.
     לא מאחסן – מידע דינמי בלבד.
     """
-    headers = {"Authorization": AUTH_HEADER, "Accept": "application/json"}
+    headers = {"Authorization": _auth_header(), "Accept": "application/json"}
 
     supplier_filter = ' or '.join(
         [f"Y_2075_5_ESH eq '{s}'" for s in SUPPLIER_NAMES]
@@ -65,6 +76,9 @@ def fetch_partbal_inventory(warehouse_filter=None, progress_callback=None):
     @_RETRY
     def _fetch_page(p):
         r = requests.get(PARTBAL_URL, headers=headers, params=p, timeout=30)
+        if r.status_code >= 500:
+            logger.warning("PARTBAL HTTP %s (transient): %s", r.status_code, r.text[:300])
+            raise TransientNetworkError(f"Priority PARTBAL HTTP {r.status_code}")
         if r.status_code != 200:
             raise Exception(f"שגיאת API ({r.status_code}): {r.text[:300]}")
         return r.json().get('value', [])

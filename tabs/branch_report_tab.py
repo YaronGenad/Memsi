@@ -9,6 +9,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 
 from fetch_combined import fetch_with_cache, combine_data
+from logger import logger
 
 
 class BranchLoadWorker(QThread):
@@ -28,8 +29,10 @@ class BranchLoadWorker(QThread):
             self.progress.emit(f"עיבוד {len(documents)} מסמכים…")
             combined = combine_data(documents, logfile)
             self.finished.emit(combined[combined['סטטוס'] == 'סופית'])
-        except Exception as e:
-            import traceback; self.error.emit(traceback.format_exc())
+        except Exception:
+            import traceback
+            logger.exception("BranchLoadWorker failed")
+            self.error.emit(traceback.format_exc())
 
 
 class BranchReportWorker(QThread):
@@ -58,8 +61,10 @@ class BranchReportWorker(QThread):
                     else:
                         self.progress.emit(f"  - {branch}: אין נתונים")
             self.finished.emit(filename)
-        except Exception as e:
-            import traceback; self.error.emit(traceback.format_exc())
+        except Exception:
+            import traceback
+            logger.exception("BranchReportWorker failed")
+            self.error.emit(traceback.format_exc())
 
 
 class BranchReportTab(QWidget):

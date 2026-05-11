@@ -7,6 +7,8 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 
+from logger import logger
+
 
 class InventoryWorker(QThread):
     progress = pyqtSignal(str)
@@ -31,8 +33,10 @@ class InventoryWorker(QThread):
                 df = df.copy()
                 df['זיהוי מזוודה'] = df['תיאור מוצר'].apply(identify_luggage)
             self.finished.emit(df)
-        except Exception as e:
-            import traceback; self.error.emit(traceback.format_exc())
+        except Exception:
+            import traceback
+            logger.exception("InventoryWorker failed")
+            self.error.emit(traceback.format_exc())
 
 
 class InventoryTab(QWidget):

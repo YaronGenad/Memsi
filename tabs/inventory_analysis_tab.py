@@ -10,6 +10,7 @@ from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 
 from fetch_combined import fetch_with_cache, combine_data
 from inventory_analysis import filter_by_attributes
+from logger import logger
 
 
 class InventoryAnalysisWorker(QThread):
@@ -37,8 +38,10 @@ class InventoryAnalysisWorker(QThread):
             sheets = filter_by_attributes(combined, self.brand_filter,
                                           self.material_filter, self.size_filter)
             self.finished.emit(sheets)
-        except Exception as e:
-            import traceback; self.error.emit(traceback.format_exc())
+        except Exception:
+            import traceback
+            logger.exception("InventoryAnalysisWorker failed")
+            self.error.emit(traceback.format_exc())
 
 
 class InventoryAnalysisTab(QWidget):

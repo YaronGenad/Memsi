@@ -8,6 +8,7 @@ from domain_repository import (
     identify_luggage, list_customers,
 )
 from cache_manager import CacheManager
+from errors import ConfigError, TransientNetworkError
 from logger import logger
 
 import os
@@ -15,7 +16,18 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 # load_dotenv כבר רץ ב-db_config.py בעת import.
 
-AUTH_HEADER   = os.environ['PRIORITY_AUTH_HEADER']
+
+def _auth_header() -> str:
+    """טוען AUTH_HEADER lazy מהסביבה. זורק ConfigError אם חסר.
+    כך ש-import של הקובץ לא קורס במכונות בלי .env מוגדר."""
+    h = os.environ.get('PRIORITY_AUTH_HEADER')
+    if not h:
+        raise ConfigError(
+            "PRIORITY_AUTH_HEADER לא מוגדר. ערוך את .env והגדר את המשתנה."
+        )
+    return h
+
+
 _BASE_URL     = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema')
 DOCUMENTS_URL = f"{_BASE_URL}/DOCUMENTS_D"
 LOGFILE_URL   = f"{_BASE_URL}/LOGFILE"
@@ -24,8 +36,10 @@ LOGFILE_URL   = f"{_BASE_URL}/LOGFILE"
 # וגרם ל-ReadTimeout. עכשיו 120s עם 5 ניסיונות.
 ODATA_TIMEOUT = int(os.environ.get('PRIORITY_TIMEOUT', 120))
 
+# שגיאות-רשת זמניות שמצדיקות retry. ConnectionError/Timeout מטופלים על-ידי
+# requests; HTTP 5xx ועומס-שרת מטופלים על-ידי הקוד שלנו דרך TransientNetworkError.
 _RETRY = retry(
-    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout)),
+    retry=retry_if_exception_type((requests.ConnectionError, requests.Timeout, TransientNetworkError)),
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=2, min=4, max=30),
     reraise=True,
@@ -43,7 +57,7 @@ _target_customers = get_target_customers
 def _fetch_odata_all(url: str, params: dict, progress=None) -> list:
     """שולף כל הדפים מ-OData endpoint עם $top/$skip pagination.
     progress: callable(str) אופציונלי לעדכוני התקדמות."""
-    headers = {"Authorization": AUTH_HEADER}
+    headers = {"Authorization": _auth_header()}
     all_records = []
     params = dict(params)
     params['$top'] = 1000
@@ -52,7 +66,12 @@ def _fetch_odata_all(url: str, params: dict, progress=None) -> list:
     @_RETRY
     def _page(p):
         r = requests.get(url, headers=headers, params=p, timeout=ODATA_TIMEOUT)
+        if r.status_code >= 500:
+            # שגיאת שרת זמנית — Priority נחנק, נסה שוב.
+            logger.warning("OData %s HTTP %s (transient): %s", url, r.status_code, r.text[:300])
+            raise TransientNetworkError(f"Priority HTTP {r.status_code}")
         if r.status_code != 200:
+            # שגיאה ברמת-בקשה: 4xx, שלא תיפתר ע"י retry.
             logger.error("OData %s HTTP %s: %s", url, r.status_code, r.text[:300])
             raise Exception(f"HTTP {r.status_code}: {r.text[:200]}")
         return r.json().get('value', [])

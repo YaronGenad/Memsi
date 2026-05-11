@@ -353,7 +353,8 @@ def newsvendor_order(mean_demand: float, std_demand: float,
 # ────────────────────────────────────────────────
 
 def run_all_models(series: pd.Series, horizon: int,
-                   events_df: pd.DataFrame, context: dict) -> dict:
+                   events_df: pd.DataFrame, context: dict,
+                   progress_callback=None) -> dict:
     """
     מריץ את כל המודלים ומחזיר dict:
     {
@@ -363,8 +364,18 @@ def run_all_models(series: pd.Series, horizon: int,
         'newsvendor': dict עם המלצת רכש ל-horizon חודשים,
         'descriptions': {model: str},
     }
+
+    progress_callback: Callable[[str], None] אופציונלי. אם סופק, מקבל הודעות
+    התקדמות במקום ה-print שהיה כאן בעבר. workers שמשתמשים ב-Qt signals
+    צריכים לעטוף את ה-signal.emit ב-callback.
     """
     results = {}
+
+    def _note(msg: str):
+        if progress_callback is not None:
+            progress_callback(msg)
+        else:
+            logger.info(msg)
 
     logger.info("run_all_models: n=%d horizon=%d context=%s", len(series), horizon, context)
 
@@ -378,13 +389,13 @@ def run_all_models(series: pd.Series, horizon: int,
     except Exception:
         _arima_fn, _prophet_fn, _xgboost_fn = forecast_arima, forecast_prophet, forecast_xgboost
 
-    print("  מריץ ARIMA...")
+    _note("  מריץ ARIMA...")
     results['arima']   = _arima_fn(series, horizon, events_df, context)
 
-    print("  מריץ Prophet...")
+    _note("  מריץ Prophet...")
     results['prophet'] = _prophet_fn(series, horizon, events_df, context)
 
-    print("  מריץ XGBoost...")
+    _note("  מריץ XGBoost...")
     results['xgboost'] = _xgboost_fn(series, horizon, events_df, context)
 
     # Newsvendor על ממוצע שלושת המודלים
