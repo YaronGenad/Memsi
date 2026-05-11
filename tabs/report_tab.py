@@ -6,8 +6,8 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt
 
-from fetch_combined import fetch_with_cache, combine_data, TARGET_CUSTOMERS
-from pricing_data import get_supplier_payment
+from fetch_combined import fetch_with_cache, combine_data, get_target_customers
+from domain_repository import get_supplier_payment
 
 from tabs._base import BaseTabWorker, format_error_for_user
 from tabs._widgets import MonthYearPicker, ExcelExporter, slice_by_column
@@ -120,7 +120,7 @@ class ReportGeneratorTab(QWidget):
 
     def _on_report_ready(self, combined):
         try:
-            sheets = slice_by_column(combined, 'מספר לקוח', values=TARGET_CUSTOMERS)
+            sheets = slice_by_column(combined, 'מספר לקוח', values=get_target_customers())
 
             suppliers_data = combined[
                 combined['פרטים'].notna() & (combined['פרטים'] != '')

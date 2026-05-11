@@ -5,24 +5,32 @@
 product_identification.py) לטבלאות שנוצרו ב-001.
 
 מריץ INSERT ... ON CONFLICT DO NOTHING כדי שאפשר יהיה להריץ מחדש בבטחה.
+
+הערה (Sprint A2): ה-imports של pricing_data/branch_names/וכו' הם lazy בתוך
+run() כדי שהקובץ הזה לא ייכשל ב-import-time אחרי שה-shims האלה יהפכו ל-stubs.
+המיגרציה הזאת רצה פעם אחת בעבר (schema_version מסמן אותה ב-applied);
+היא לא תרוץ שוב, ולכן זה בסדר שה-imports עלולים להיכשל ב-runtime אם
+ה-shims הוסרו לחלוטין.
 """
-from pricing_data import (
-    CUSTOMER_REPAIR_PRICING,
-    CUSTOMER_REPLACEMENT_PRICING,
-    REPAIR_PRICING,
-    REPLACEMENT_PRICING,
-    SUPPLIER_REPAIR_PRICING,
-    SUPPLIER_REPLACEMENT_PRICING,
-)
-from branch_names import BRANCH_NAMES
-from warehouse_config import APPROVED_WAREHOUSES
-from product_identification import LUGGAGE_IDENTIFICATION
 
 
 SEED_USER = 'seed:002'
 
 
 def run(conn):
+    # imports נדחים — ראה הערה למעלה.
+    from pricing_data import (  # noqa: E402
+        CUSTOMER_REPAIR_PRICING,
+        CUSTOMER_REPLACEMENT_PRICING,
+        REPAIR_PRICING,
+        REPLACEMENT_PRICING,
+        SUPPLIER_REPAIR_PRICING,
+        SUPPLIER_REPLACEMENT_PRICING,
+    )
+    from branch_names import BRANCH_NAMES  # noqa: E402
+    from warehouse_config import APPROVED_WAREHOUSES  # noqa: E402
+    from product_identification import LUGGAGE_IDENTIFICATION  # noqa: E402
+
     cur = conn.cursor()
 
     # 1) pricing_tiers - כל ה-keys מ-REPAIR_PRICING ∪ REPLACEMENT_PRICING

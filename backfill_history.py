@@ -18,7 +18,7 @@ from dateutil.relativedelta import relativedelta
 
 from cache_manager import CacheManager
 from forecast_db import ForecastDB
-from product_identification import identify_luggage
+from domain_repository import identify_luggage
 from fetch_combined import fetch_documents, fetch_logfile
 
 BACKFILL_START = "2023-01"

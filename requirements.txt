@@ -9,9 +9,7 @@ matplotlib
 statsmodels
 prophet
 xgboost
-scikit-learn
 scipy
-sqlalchemy
 python-bidi
 python-dotenv
 tenacity

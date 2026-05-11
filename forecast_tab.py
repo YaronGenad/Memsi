@@ -20,7 +20,7 @@ from matplotlib.figure import Figure
 
 from forecast_db import ForecastDB
 from forecast_engine import run_all_models, forecast_arima, forecast_prophet, forecast_xgboost, newsvendor_order
-from branch_names import get_display_label
+from domain_repository import get_display_label
 from logger import logger
 
 try:
