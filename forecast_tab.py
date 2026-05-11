@@ -512,6 +512,8 @@ class ForecastTab(QWidget):
         self.tabs.addTab(self._build_tab_procurement(), "תכנון רכש")
         # Tab 6 — תמונת מצב סניף
         self.tabs.addTab(self._build_tab_snapshot(), "תמונת מצב סניף")
+        # Tab 7 — תרחישים
+        self.tabs.addTab(self._build_tab_scenarios(), "תרחישים")
 
         root.addWidget(self.tabs)
 
@@ -1222,3 +1224,148 @@ class ForecastTab(QWidget):
                 self.proc_table.setItem(row, col, it)
 
         self.proc_table.resizeColumnsToContents()
+
+    # ── Tab 7: תרחישים ─────────────────────────────────────
+    def _build_tab_scenarios(self):
+        """תחזית מותנית-תרחיש מבוססת על flight_traffic + conversion_regime.
+
+        מציג טבלה: כל שורה היא חודש בהורייזון, כל עמודה היא תרחיש (4 תרחישים).
+        המשתמש בוחר regime וגודל-הורייזון, ורואה את 4 התחזיות זו-לצד-זו.
+
+        הלוגיקה מ-scenario_engine.py: expected_demand = flights × conversion_rate.
+        """
+        from qtpy.QtWidgets import QComboBox, QPushButton, QHBoxLayout
+
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setSpacing(8)
+
+        # כותרת + הסבר קצר
+        title = QLabel("תחזית לפי תרחיש (מבוסס על נתוני נחיתות BG ו-regime היסטורי)")
+        title.setStyleSheet("font-size:14px;font-weight:bold;color:#2c3e50;")
+        title.setAlignment(Qt.AlignCenter)
+        v.addWidget(title)
+
+        explanation = QLabel(
+            "התחזית מחשבת: כמות תיקונים = נחיתות מצופות × conversion-rate של ה-regime.\n"
+            "ה-regime נלמד היסטורית — בחר ב-regime שאתה צופה שיהיה רלוונטי לחודשים הבאים.\n"
+            "8 סניפי-הליבה: ביאליק ת\"א, פולג, קרית אונו, הדר ירושלים, אמות באר שבע, "
+            "שרונים, אשקלון, שפיים."
+        )
+        explanation.setStyleSheet("font-size:11px;color:#7f8c8d;padding:4px;")
+        explanation.setWordWrap(True)
+        v.addWidget(explanation)
+
+        # קונטרולים
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Regime:"))
+        self.scen_regime = QComboBox()
+        self.scen_regime.addItem("LOW (~50 תיקונים/100K נחיתות — pre-war / post-trauma)", "LOW")
+        self.scen_regime.addItem("MEDIUM (~80 — ceasefire רגיל)", "MEDIUM")
+        self.scen_regime.addItem("HIGH (~150 — שגרת-מלחמה עם backlog)", "HIGH")
+        controls.addWidget(self.scen_regime)
+
+        controls.addSpacing(20)
+        controls.addWidget(QLabel("אופק:"))
+        self.scen_horizon = QComboBox()
+        self.scen_horizon.addItems(["3 חודשים", "6 חודשים", "9 חודשים", "12 חודשים"])
+        self.scen_horizon.setCurrentIndex(1)
+        controls.addWidget(self.scen_horizon)
+
+        controls.addSpacing(20)
+        self.scen_run_btn = QPushButton("חשב תרחישים")
+        self.scen_run_btn.setStyleSheet(
+            "QPushButton{background:#27ae60;color:white;padding:6px 14px;"
+            "border-radius:4px;font-weight:bold;}"
+            "QPushButton:hover{background:#229954;}"
+        )
+        self.scen_run_btn.clicked.connect(self._run_scenarios)
+        controls.addWidget(self.scen_run_btn)
+
+        controls.addStretch()
+        v.addLayout(controls)
+
+        # טבלת תרחישים: שורה=חודש, עמודות=4 תרחישים
+        self.scen_table = QTableWidget()
+        self.scen_table.setColumnCount(5)
+        self.scen_table.setHorizontalHeaderLabels([
+            "חודש", "אסקלציה", "סטטוס-קוו", "חזרה הדרגתית", "פתיחת שמיים"
+        ])
+        self.scen_table.horizontalHeader().setStretchLastSection(True)
+        self.scen_table.setAlternatingRowColors(True)
+        v.addWidget(self.scen_table)
+
+        # סטטוס תחתית
+        self.scen_status = QLabel("")
+        self.scen_status.setStyleSheet("font-size:11px;color:#7f8c8d;padding:4px;")
+        self.scen_status.setWordWrap(True)
+        v.addWidget(self.scen_status)
+
+        return w
+
+    def _run_scenarios(self):
+        """מחשב את 4 התרחישים ומציג בטבלה."""
+        from scenario_engine import (
+            forecast_all_scenarios, compute_conversion_rates,
+            baseline_arriving_passengers, FLIGHT_SCENARIOS,
+        )
+        try:
+            regime = self.scen_regime.currentData()
+            horizon_text = self.scen_horizon.currentText()
+            horizon = {"3 חודשים": 3, "6 חודשים": 6,
+                       "9 חודשים": 9, "12 חודשים": 12}.get(horizon_text, 6)
+
+            # למצוא את החודש האחרון עם נתון
+            from db_config import get_conn
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT MAX(year_month) FROM flight_traffic
+                        WHERE arriving_passengers IS NOT NULL AND notes = 'ok'
+                    """)
+                    last_ym = cur.fetchone()[0]
+            if not last_ym:
+                self.scen_status.setText("אין נתוני flight_traffic זמינים")
+                return
+
+            result = forecast_all_scenarios(last_ym, horizon, regime)
+            baseline = baseline_arriving_passengers()
+            rates = compute_conversion_rates()
+
+            # סטטוס: מה הרקע
+            self.scen_status.setText(
+                f"חודש בסיס: {last_ym} | "
+                f"ממוצע נחיתות (3 ח' אחרונים): {baseline:,.0f} | "
+                f"conversion-rate ל-{regime}: {rates[regime]:.1f}/100K"
+            )
+
+            # מילוי טבלה
+            self.scen_table.setRowCount(horizon)
+            scenario_order = ['escalation', 'status_quo', 'gradual_recovery', 'open_skies']
+            self.scen_table.setUpdatesEnabled(False)
+            try:
+                for row in range(horizon):
+                    ym = result[scenario_order[0]][row].year_month
+                    self.scen_table.setItem(row, 0, QTableWidgetItem(ym))
+                    for col, scen in enumerate(scenario_order, start=1):
+                        f = result[scen][row]
+                        cell = QTableWidgetItem(
+                            f"{f.expected_demand}  ({f.expected_flights/1000:.0f}K)"
+                        )
+                        cell.setTextAlignment(Qt.AlignCenter)
+                        # צבע לפי תרחיש
+                        colors = {
+                            1: '#fadbd8',   # אסקלציה — אדום-בהיר
+                            2: '#fef9e7',   # סטטוס-קוו — צהוב-בהיר
+                            3: '#d6eaf8',   # חזרה הדרגתית — כחול-בהיר
+                            4: '#d5f5e3',   # פתיחת שמיים — ירוק-בהיר
+                        }
+                        cell.setBackground(QColor(colors[col]))
+                        self.scen_table.setItem(row, col, cell)
+            finally:
+                self.scen_table.setUpdatesEnabled(True)
+            self.scen_table.resizeColumnsToContents()
+
+        except Exception:
+            logger.exception("_run_scenarios failed")
+            self.scen_status.setText("שגיאה בחישוב — עיין ב-log")

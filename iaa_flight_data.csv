@@ -1,0 +1,52 @@
+﻿year_month,total_passengers,arriving_passengers,total_flights,arriving_flights,active_airlines,source_url,notes
+2022-01,420438,219236,5570,2785,,https://www.iaa.gov.il/media/oril01yl/דוח-פעילות-חודשי-נתבג-ינואר-2022.pdf,ok
+2022-02,700950,343614,6214,3110,,https://www.iaa.gov.il/media/5t5iqjkm/דוח-חודשי-פברואר-22-עברית-מונגש.pdf,ok
+2022-03,1214734,616452,9111,4557,,https://www.iaa.gov.il/media/whqjw3sq/דוח-חודשי-מרץ-22-עברית-מונגש.pdf,ok
+2022-04,1557914,778285,11724,5865,,https://www.iaa.gov.il/media/wtfctsjj/דוח-חודשי-אפריל-22-עברית-מונגש.pdf,ok
+2022-05,1637267,834100,11689,5846,,https://www.iaa.gov.il/media/gghp3gwo/דוח_חודשי_מאי_22-עברית_-_מונגש.pdf,ok
+2022-06,1743092,848795,12134,6065,,https://www.iaa.gov.il/media/wb0nwrne/דוח_חודשי_יוני_22-_עברית_-_מונגש.pdf,ok
+2022-07,2120478,1029610,13799,6904,,https://www.iaa.gov.il/media/npufiphu/יולי-2022-עברית-מונגש.pdf,ok
+2022-08,2278849,1141173,14185,7089,,https://www.iaa.gov.il/media/dr4ngkzi/אוגוסט-2022-עברית-מונגש.pdf,ok
+2022-09,2050829,1016529,13249,6623,,https://www.iaa.gov.il/media/4idpvwcq/ספטמבר-2022-עברית-מונגש.pdf,ok
+2022-10,1995924,1084729,12769,6394,,https://www.iaa.gov.il/media/0jcg340z/אוקטובר-2022-עברית-מונגש.pdf,ok
+2022-11,1719288,840766,11536,5762,,https://www.iaa.gov.il/media/gj0ocnvv/נובמבר-2022-עברית-מונגש.pdf,ok
+2022-12,1783017,889626,12031,6016,,https://www.iaa.gov.il/media/nowcwjmp/2022-12-עברית-מונגש.pdf,ok
+2023-01,1633372,819009,11574,5782,,https://www.iaa.gov.il/media/xeufjjy3/2023-1_עברית_-_מונגש.pdf,ok
+2023-02,1537924,772907,10497,5253,,https://www.iaa.gov.il/media/xgdb1v5a/דוח_פברואר_2023_עברית_-_מונגש.pdf,ok
+2023-03,1913719,925792,12792,6397,,https://www.iaa.gov.il/media/rmxbs0sw/מרץ-2023-עברית-מונגש.pdf,ok
+2023-04,2058420,1067694,14275,7139,,https://www.iaa.gov.il/media/uy3gce11/דוח_אפריל_2023_עברית_-_מונגש.pdf,ok
+2023-05,1992669,983583,14182,7088,,https://www.iaa.gov.il/media/dnnmw104/עברית-מאי-2023-מונגש-5-1.pdf,ok
+2023-06,2191543,1049889,14961,7489,,https://www.iaa.gov.il/media/03zaqeww/דוח-חודשי-עברית-יוני-2023-מונגש.pdf,ok
+2023-07,2545080,1235430,16639,8313,,https://www.iaa.gov.il/media/2k2d3jaw/דוח-יולי-2023-עברית-מונגש-מוקטן.pdf,ok
+2023-08,,,,,,https://www.iaa.gov.il/media/0qtbhozf/דוח-חודשי-אוגוסט-2023-עברית-מונגש.pdf,image-only PDF (no text layer; would require OCR such as Tesseract to extract)
+2023-09,,,,,,https://www.iaa.gov.il/media/rcxdogag/דוח-חודשי-מונגש-ספטמבר.pdf,image-only PDF (no text layer; would require OCR such as Tesseract to extract)
+2023-10,,,,,,https://www.iaa.gov.il/media/145irb2z/דוח-אוקטובר-2023-מונגש-עברית.pdf,image-only PDF (no text layer; would require OCR such as Tesseract to extract)
+2023-11,382081,222350,3714,1852,,https://www.iaa.gov.il/media/md1fdrwt/דוח-חודשי-נובמבר-2023-עברית-מונגש-מוקטן.pdf,ok
+2023-12,524030,274595,4349,2177,,https://www.iaa.gov.il/media/qiqpgwi5/דוח-חודשי-דצמבר-2023-עברית-מונגש-מוקטן.pdf,ok
+2024-01,597854,304595,4732,2366,,https://www.iaa.gov.il/media/wo4furu4/דוח-חודשי-ינואר-24-עברית-מונגש-מוקטן.pdf,ok
+2024-02,696700,344895,5224,2613,,https://www.iaa.gov.il/media/haxn4chx/דוח-חודשי-פברואר-2024-עברית-מונגש-מוקטן-1.pdf,ok
+2024-03,902111,450904,6781,3391,,https://www.iaa.gov.il/media/an4hz1gr/עברית-דוח-חודש-מרץ-2024-מונגש-מוקטן.pdf,ok
+2024-04,1156602,542562,8681,4337,,https://www.iaa.gov.il/media/0phjttod/דוח-חודשי-אפריל-2024-עברית-מונגש-מוקטן.pdf,ok
+2024-05,1224451,638296,8960,4488,,https://www.iaa.gov.il/media/l0pfkxzb/דוח-חודשי-מאי-עברית-2024-מונגש-מוקטן.pdf,ok
+2024-06,1422095,687126,10063,5022,,https://www.iaa.gov.il/media/mlcossw4/דוח-חודשי-יוני-2024-עברית-מונגש-מוקטן.pdf,ok
+2024-07,1773102,842202,12076,6044,,https://www.iaa.gov.il/media/lepbyq5y/דוח-חודשי-יולי-2024-עברית-מונגש-מוקטן.pdf,ok
+2024-08,1586662,809396,11136,5561,,https://www.iaa.gov.il/media/1h5psb0l/דוח-חודשי-אוגוסט-עברית-מונגש-מוקטן.pdf,ok
+2024-09,1491529,753850,10770,5377,,https://www.iaa.gov.il/media/wvyhxunz/דוח-חודשי-ספטמבר-2024-עברית-מונגש-מוקטן-1.pdf,ok
+2024-10,1088375,573435,8476,4236,,https://www.iaa.gov.il/media/q0db5wol/דוח-חודשי-אוקטובר-2024-עברית-מונגש-מוקטן.pdf,ok
+2024-11,859630,442323,6982,3496,,https://www.iaa.gov.il/media/tuwh0uvp/דוח-חודשי-עברית-נובמבר-2024-מונגש-מוקטן.pdf,ok
+2024-12,1079330,531704,8304,4162,,https://www.iaa.gov.il/media/4emkfr2w/דוח-חודשי-דצמבר-2024-עברית-מונגש-מוקטן.pdf,ok
+2025-01,1134700,576453,8726,4367,,https://www.iaa.gov.il/media/jkzgwqu3/דוח-חודשי-ינואר-2025-מונגש-עברית_.pdf,ok
+2025-02,1083050,539868,8154,4074,,https://www.iaa.gov.il/media/n3chfbxm/דוח-חודשי-פברואר-2025-עברית.pdf,ok
+2025-03,1367313,665771,10302,5151,,https://www.iaa.gov.il/media/z4odmwoi/דוח-חודשי-מרץ-2025-עברית.pdf,ok
+2025-04,1835979,927028,13363,6683,,https://www.iaa.gov.il/media/0e4njpuk/דוח-חודשי-עברית-אפריל-מונגש-2025.pdf,ok
+2025-05,1448420,726472,10759,5378,,https://www.iaa.gov.il/media/gyfpelph/דוח-חודשי-מאי-2025-מונגש-עברית_.pdf,ok
+2025-06,833150,428918,6483,3225,,https://www.iaa.gov.il/media/hb1hcsxt/דוח-חודשי-יוני-2025-מונגש-עברית.pdf,ok
+2025-07,1674177,763728,12195,6106,,https://www.iaa.gov.il/media/qvplf1mi/דוח-חודשי-יולי-מונגש-2025-עברית.pdf,ok
+2025-08,2203973,1123913,14601,7304,,https://www.iaa.gov.il/media/4gghwh2m/דוח-חודשי-אוגוסט-2025-מונגש-עברית.pdf,ok
+2025-09,1984137,972883,13923,6958,,https://www.iaa.gov.il/media/forb25zs/ספטמבר-2025-עברית-מונגש.pdf,ok
+2025-10,1794242,977436,13058,6524,,https://www.iaa.gov.il/media/khmhibol/אוקטובר-2025-עברית-מונגש.pdf,ok
+2025-11,1396129,692151,10666,5333,,https://www.iaa.gov.il/media/nq0mdrps/דוח-חודשי-נובמבר-2025-מונגש-עברית.pdf,ok
+2025-12,1716971,865364,11985,5993,,https://www.iaa.gov.il/media/r4bjwxm5/דוח-חדשי-דצמבר-2025-מונגש-עברית.pdf,ok
+2026-01,1424712,706905,10914,5456,,https://www.iaa.gov.il/media/geskf5qk/דוח-חודשי-ינואר-2026-עברית-cleaned.pdf,ok
+2026-02,1194234,600800,9633,4797,,https://www.iaa.gov.il/media/ublpjwzu/דוח-חודשי-פברואר-2026-עברית-cleaned.pdf,ok
+2026-03,203254,118345,2720,1357,,https://www.iaa.gov.il/media/z2apxcx4/דוח-חודשי-מרץ-2026-מונגש-עברית.pdf,total_passengers=203254 out of range; arriving_passengers=118345 out of range; total_flights=2720 out of range; arriving_flights=1357 out of range
