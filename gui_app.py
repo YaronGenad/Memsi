@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import sys
 from qtpy.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel, QMessageBox,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel,
     QHBoxLayout, QTabWidget,
 )
 from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
@@ -104,6 +104,7 @@ class MainWindow(QMainWindow):
     def _run_health_checks(self):
         # bootstrap-check בלבד: וודא ש-DB נגיש ושטבלת-מפתח אחת קיימת.
         # יצירת/עדכון schema הוא תהליך נפרד דרך migrate.py — לא מתבצע כאן.
+        # במקום QMessageBox חוסם, מציגים banner בשורת-הסטטוס שלא חוסם את ה-app.
         try:
             from db_config import get_conn
             with get_conn() as conn:
@@ -119,12 +120,13 @@ class MainWindow(QMainWindow):
             self._set_status(self._db_dot, self._db_lbl, True, "DB: מחובר")
             logger.info("health_check DB: OK")
         except Exception as e:
-            self._set_status(self._db_dot, self._db_lbl, False, f"DB: {str(e)[:60]}")
-            logger.error("health_check DB failed: %s", e)
-            QMessageBox.critical(
-                self, "שגיאת חיבור",
-                f"לא ניתן להתחבר למסד הנתונים:\n{e}\n\nהתוכנה תפעל במצב מוגבל.",
+            short = str(e).strip().splitlines()[0][:120]
+            self._set_status(self._db_dot, self._db_lbl, False, f"DB: {short}")
+            self._db_lbl.setToolTip(
+                f"שגיאה: {e}\n\nפעולות שדורשות DB יכשלו עד שהחיבור יחזור.\n"
+                "אם זה לאחר התקנה ראשונה, הרץ: python migrate.py"
             )
+            logger.exception("health_check DB failed")
 
         self._api_worker = HealthCheckWorker()
         self._api_worker.finished.connect(self._on_api_health)
@@ -140,6 +142,50 @@ class MainWindow(QMainWindow):
         dot.setStyleSheet(f"font-size:10px; color:{color};")
         lbl.setStyleSheet(f"font-size:11px; color:{color};")
         lbl.setText(text)
+
+    def closeEvent(self, event):
+        """המתנה ל-workers פעילים לפני יציאה.
+
+        מוצא את כל ה-QThread-ים שנעטפו ב-instance attributes שלנו (ושל
+        ה-tabs) ומחכה להם עד 5 שניות. אם לא הסתיימו — מבצע terminate() עם
+        אזהרה ב-log. בלי זה, QThread פעיל נהרג באמצע ועלול להשאיר חיבור
+        DB פתוח ב-pool או קובץ זמני פתוח.
+        """
+        workers = self._active_workers()
+        if workers:
+            logger.info("closeEvent: waiting for %d worker(s) to finish", len(workers))
+            for w in workers:
+                if not w.wait(5000):
+                    logger.warning("closeEvent: worker %s did not finish in 5s, terminating",
+                                   type(w).__name__)
+                    w.terminate()
+                    w.wait(1000)
+        # סגירת ה-pool ביציאה נקייה (psycopg2 סוגר כל החיבורים שיש).
+        try:
+            from db_config import close_pool
+            close_pool()
+        except Exception:
+            logger.exception("close_pool failed")
+        super().closeEvent(event)
+
+    def _active_workers(self) -> list:
+        """אוסף QThread פעילים מכל הtabs ומ-self."""
+        from qtpy.QtCore import QThread
+        seen = []
+        stack = [self]
+        # אוספים מעצמנו ומכל ה-widgets-הילדים, כל QThread שיש כ-attribute
+        # על אחד מהם.
+        for widget in self.findChildren(QWidget) + [self]:
+            for name in dir(widget):
+                if name.startswith('__'):
+                    continue
+                try:
+                    attr = getattr(widget, name, None)
+                except Exception:
+                    continue
+                if isinstance(attr, QThread) and attr.isRunning() and attr not in seen:
+                    seen.append(attr)
+        return seen
 
 
 if __name__ == '__main__':

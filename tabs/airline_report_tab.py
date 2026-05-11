@@ -10,6 +10,7 @@ from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 from dateutil.relativedelta import relativedelta
 
 from fetch_combined import fetch_with_cache, combine_data, get_target_customers
+from logger import logger
 
 
 class MultiMonthReportWorker(QThread):
@@ -41,8 +42,10 @@ class MultiMonthReportWorker(QThread):
                     sheets[ym] = combined
                 current = (current + relativedelta(months=1)).replace(day=1)
             self.finished.emit(sheets)
-        except Exception as e:
-            import traceback; self.error.emit(traceback.format_exc())
+        except Exception:
+            import traceback
+            logger.exception("MultiMonthReportWorker failed")
+            self.error.emit(traceback.format_exc())
 
 
 class AirlineReportTab(QWidget):
