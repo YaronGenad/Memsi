@@ -514,6 +514,8 @@ class ForecastTab(QWidget):
         self.tabs.addTab(self._build_tab_snapshot(), "תמונת מצב סניף")
         # Tab 7 — תרחישים
         self.tabs.addTab(self._build_tab_scenarios(), "תרחישים")
+        # Tab 8 — תחזית פר-תא
+        self.tabs.addTab(self._build_tab_per_cell(), "תחזית פר-תא")
 
         root.addWidget(self.tabs)
 
@@ -1369,3 +1371,194 @@ class ForecastTab(QWidget):
         except Exception:
             logger.exception("_run_scenarios failed")
             self.scen_status.setText("שגיאה בחישוב — עיין ב-log")
+
+    # ── Tab 8: תחזית פר-תא ────────────────────────────────
+    BASELINE_BRANCHES_C2 = ['05', '07', '23', '310', '325', '331', '332', '346']
+
+    def _build_tab_per_cell(self):
+        """תחזית פר-(branch, cell) עם graceful degradation.
+
+        מציג טבלה גדולה: שורה = (branch, cell), עמודות = champion model,
+        n_obs, fallback_level, MAE, ותחזית ל-6 חודשים קדימה.
+        """
+        from qtpy.QtWidgets import (
+            QComboBox, QPushButton, QHBoxLayout, QProgressBar, QSplitter,
+        )
+
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setSpacing(8)
+
+        title = QLabel("תחזית פר-(סניף × קטגוריה) — 8 סניפי-ליבה")
+        title.setStyleSheet("font-size:14px;font-weight:bold;color:#2c3e50;")
+        title.setAlignment(Qt.AlignCenter)
+        v.addWidget(title)
+
+        explanation = QLabel(
+            "תחזית ספציפית לכל סניף-וקטגוריה. cells דלילים (פחות מ-12 חודשים) "
+            "מקבלים fallback למודל-קטגוריה רחב יותר. champion = המודל עם MAE נמוך "
+            "ביותר ב-walk-forward backtest."
+        )
+        explanation.setStyleSheet("font-size:11px;color:#7f8c8d;padding:4px;")
+        explanation.setWordWrap(True)
+        v.addWidget(explanation)
+
+        # קונטרולים
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("אופק:"))
+        self.pc_horizon = QComboBox()
+        self.pc_horizon.addItems(["3 חודשים", "6 חודשים", "9 חודשים", "12 חודשים"])
+        self.pc_horizon.setCurrentIndex(1)
+        controls.addWidget(self.pc_horizon)
+        controls.addSpacing(12)
+
+        controls.addWidget(QLabel("Backtest folds:"))
+        self.pc_folds = QComboBox()
+        self.pc_folds.addItems(["3", "5", "10"])
+        self.pc_folds.setCurrentIndex(1)
+        controls.addWidget(self.pc_folds)
+        controls.addSpacing(12)
+
+        self.pc_run_btn = QPushButton("הרץ תחזיות פר-תא")
+        self.pc_run_btn.setStyleSheet(
+            "QPushButton{background:#8e44ad;color:white;padding:6px 14px;"
+            "border-radius:4px;font-weight:bold;}"
+            "QPushButton:hover{background:#7d3c98;}"
+            "QPushButton:disabled{background:#bdc3c7;}"
+        )
+        self.pc_run_btn.clicked.connect(self._run_per_cell)
+        controls.addWidget(self.pc_run_btn)
+        controls.addStretch()
+        v.addLayout(controls)
+
+        self.pc_progress = QProgressBar()
+        self.pc_progress.setRange(0, 0)
+        self.pc_progress.setVisible(False)
+        v.addWidget(self.pc_progress)
+
+        self.pc_status = QLabel("")
+        self.pc_status.setStyleSheet("font-size:11px;color:#7f8c8d;padding:4px;")
+        self.pc_status.setWordWrap(True)
+        v.addWidget(self.pc_status)
+
+        # טבלת תוצאות. עמודות: branch, cell, n_obs, fallback, champion, MAE,
+        # ואז 6 עמודות לתחזית.
+        self.pc_table = QTableWidget()
+        v.addWidget(self.pc_table, 1)
+
+        return w
+
+    def _run_per_cell(self):
+        """מפעיל את forecast_hierarchical ב-worker thread."""
+        horizon = {"3 חודשים": 3, "6 חודשים": 6, "9 חודשים": 9,
+                   "12 חודשים": 12}.get(self.pc_horizon.currentText(), 6)
+        n_folds = int(self.pc_folds.currentText())
+
+        self.pc_run_btn.setEnabled(False)
+        self.pc_progress.setVisible(True)
+        self.pc_status.setText("טוען נתונים…")
+
+        # Worker class inline — לא שווה מודול נפרד עבור tab בודד
+        class _PerCellWorker(QThread):
+            progress = pyqtSignal(str)
+            finished = pyqtSignal(object)
+            error    = pyqtSignal(str)
+
+            def __init__(self, horizon, n_folds, branches):
+                super().__init__()
+                self.horizon = horizon
+                self.n_folds = n_folds
+                self.branches = branches
+
+            def run(self):
+                try:
+                    from forecast_db import ForecastDB
+                    from forecast_hierarchical import forecast_hierarchical
+                    fdb = ForecastDB()
+                    hist_df = fdb.get_history(branches=self.branches)
+                    events_df = fdb.get_events()
+                    # context default — שגרה
+                    context = {'is_war': 0, 'is_ceasefire': 1, 'jewish_holiday': 0}
+                    result = forecast_hierarchical(
+                        hist_df, horizon=self.horizon,
+                        events_df=events_df, context=context,
+                        branches=self.branches,
+                        n_folds=self.n_folds,
+                        progress_callback=lambda m: self.progress.emit(m),
+                    )
+                    self.finished.emit(result)
+                except Exception:
+                    import traceback
+                    logger.exception("per_cell worker failed")
+                    self.error.emit(traceback.format_exc())
+
+        self._pc_worker = _PerCellWorker(horizon, n_folds, self.BASELINE_BRANCHES_C2)
+        self._pc_worker.progress.connect(self.pc_status.setText)
+        self._pc_worker.finished.connect(self._on_per_cell_done)
+        self._pc_worker.error.connect(self._on_per_cell_error)
+        self._pc_worker.start()
+
+    def _on_per_cell_done(self, result: dict):
+        self.pc_progress.setVisible(False)
+        self.pc_run_btn.setEnabled(True)
+
+        cells = result.get('cells', {})
+        n = result.get('n_cells_processed', 0)
+        n_full = result.get('n_cells_full', 0)
+        agg = result.get('aggregate', {})
+        future_months = sorted(agg.keys())
+
+        self.pc_status.setText(
+            f"הושלמו {n} תאים | cell-level={n_full}, fallback={n - n_full} | "
+            f"סך-תחזית-עתידית: {sum(agg.values()):.0f} תיקונים על-פני {len(future_months)} חודשים"
+        )
+
+        # בניית הטבלה
+        cols = ['סניף', 'קטגוריה', 'n_obs', 'רמה', 'champion', 'MAE'] + future_months
+        self.pc_table.setColumnCount(len(cols))
+        self.pc_table.setHorizontalHeaderLabels(cols)
+        self.pc_table.setUpdatesEnabled(False)
+        try:
+            # מיון: branch אז cell
+            sorted_keys = sorted(cells.keys())
+            self.pc_table.setRowCount(len(sorted_keys))
+            for row, (branch, cell) in enumerate(sorted_keys):
+                cf = cells[(branch, cell)]
+                champ_df = cf.forecasts.get(cf.champion) if cf.champion else None
+                champ_map = {}
+                if champ_df is not None:
+                    for _, r in champ_df.iterrows():
+                        champ_map[r['year_month']] = int(r['forecast'])
+                mae_str = ''
+                if cf.metrics and cf.champion in cf.metrics:
+                    mae = cf.metrics[cf.champion].get('mae')
+                    if mae is not None:
+                        mae_str = f"{mae:.1f}"
+                row_cells = [
+                    branch, cell, str(cf.n_obs), cf.fallback_level,
+                    cf.champion or '—', mae_str,
+                ]
+                for ym in future_months:
+                    row_cells.append(str(champ_map.get(ym, '')))
+                # צביעה: לפי fallback level
+                bg_color = {
+                    'cell':           '#d5f5e3',   # ירוק — איכות הכי-טובה
+                    'cell_partial':   '#fef9e7',   # צהוב — לא רע
+                    'global_category':'#fadbd8',   # אדום-בהיר — fallback
+                    'global_avg':     '#f2d7d5',   # אדום — fallback אחרון
+                    'global_avg_recovered': '#f2d7d5',
+                }.get(cf.fallback_level, '#ffffff')
+                for col, val in enumerate(row_cells):
+                    it = QTableWidgetItem(val)
+                    it.setBackground(QColor(bg_color))
+                    if col >= 6:  # תחזית-חודש
+                        it.setTextAlignment(Qt.AlignCenter)
+                    self.pc_table.setItem(row, col, it)
+        finally:
+            self.pc_table.setUpdatesEnabled(True)
+        self.pc_table.resizeColumnsToContents()
+
+    def _on_per_cell_error(self, tb: str):
+        self.pc_progress.setVisible(False)
+        self.pc_run_btn.setEnabled(True)
+        self.pc_status.setText(f"שגיאה: {tb[:300]}")
