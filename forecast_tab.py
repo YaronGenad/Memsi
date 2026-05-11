@@ -193,6 +193,17 @@ class ForecastChart(QWidget):
             ('prophet', '#27ae60', 'Prophet'),
             ('xgboost', '#e67e22', 'XGBoost'),
         ]
+        # Sprint C2.5: legend מציג גם דיוק לכל מודל
+        # (מחושב מ-MAE / mean(history)). מחזק את הקריאוּת של הגרף.
+        metrics = results.get('metrics') or {}
+        hist_mean = float(history.mean()) if len(history) else 0.0
+        def _acc(model_key):
+            mae = (metrics.get(model_key) or {}).get('mae')
+            if mae is None or hist_mean <= 0:
+                return None
+            nmae = mae / hist_mean
+            return max(0.0, min(100.0, 100.0 - nmae * 100.0))
+
         base = len(history)
         for key, col, lbl in MODEL_CFG:
             if key not in results: continue
@@ -200,7 +211,9 @@ class ForecastChart(QWidget):
             fx = list(range(base, base + len(df)))
             cx = [hx[-1]] + fx
             cy = [float(history.values[-1])] + df['forecast'].tolist()
-            ax.plot(cx, cy, color=col, lw=2, ls='--', label=lbl, alpha=0.9)
+            acc = _acc(key)
+            full_lbl = f'{lbl} (דיוק {acc:.0f}%)' if acc is not None else lbl
+            ax.plot(cx, cy, color=col, lw=2, ls='--', label=full_lbl, alpha=0.9)
             ax.fill_between(fx, df['lower'], df['upper'], color=col, alpha=0.10)
             ax.scatter(fx, df['forecast'], color=col, s=28, zorder=6, alpha=0.85)
 
@@ -461,6 +474,18 @@ class ForecastTab(QWidget):
             gc.addWidget(cb)
         gc.addWidget(sep)
         gc.addWidget(routine_lbl)
+
+        # Sprint C2.5: בחירת conversion regime — איזה אחוז מהנוחתים תוקנים
+        regime_lbl = QLabel("Conversion regime (כמה מהנוחתים תוקנים):")
+        regime_lbl.setStyleSheet("font-size:10px;color:#555;padding-top:4px;")
+        gc.addWidget(regime_lbl)
+        self.regime_combo = QComboBox()
+        self.regime_combo.addItem("LOW — שגרה / post-trauma (~50/100K)", "LOW")
+        self.regime_combo.addItem("MEDIUM — ceasefire רגיל (~80/100K)", "MEDIUM")
+        self.regime_combo.addItem("HIGH — שגרת-מלחמה עם backlog (~150/100K)", "HIGH")
+        self.regime_combo.setCurrentIndex(0)
+        gc.addWidget(self.regime_combo)
+
         lv.addWidget(gb_c)
 
         # כפתורי הרצה
@@ -532,9 +557,9 @@ class ForecastTab(QWidget):
         self.fc_chart = ForecastChart()
         v.addWidget(self.fc_chart)
 
-        self.fc_table = QTableWidget(0, 7)
+        self.fc_table = QTableWidget(0, 8)
         self.fc_table.setHorizontalHeaderLabels(
-            ["חודש","ARIMA","Prophet","XGBoost","ממוצע","טווח","שינוי %"])
+            ["חודש","ARIMA","Prophet","XGBoost","ממוצע","טווח","שינוי %","דיוק תחזית"])
         self.fc_table.setMaximumHeight(165)
         self.fc_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.fc_table.setAlternatingRowColors(True)
@@ -801,6 +826,9 @@ class ForecastTab(QWidget):
             'very_low' if ctx['is_war'] else
             'low'      if ctx['is_military_op'] else
             'high'     if (ctx['is_summer_peak'] or ctx['jewish_holiday']) else 'normal')
+        # Sprint C2.5: regime נכלל ב-context; משפיע על XGBoost ו-Prophet
+        if hasattr(self, 'regime_combo'):
+            ctx['conversion_regime'] = self.regime_combo.currentData()
         return ctx
 
     def _make_title(self, labels, cats, horizon) -> str:
@@ -1094,12 +1122,33 @@ class ForecastTab(QWidget):
         self.status_label.setText("שגיאה")
         QMessageBox.critical(self, "שגיאה", tb[:1000])
 
+    @staticmethod
+    def _accuracy_pct(mae, hist_mean) -> float | None:
+        """דיוק = 100 - normalized_MAE × 100.
+        normalized_MAE = MAE / mean(history). מספק יציבות גם על סדרות
+        תנודתיות, שלא כמו MAPE שמתפוצץ על ערכים נמוכים."""
+        if mae is None or hist_mean is None or hist_mean <= 0:
+            return None
+        nmae = mae / hist_mean
+        return max(0.0, min(100.0, 100.0 - nmae * 100.0))
+
     def _fill_fc_table(self, results):
         models = ['arima','prophet','xgboost']
         dfs    = {m: results[m].set_index('year_month')
                   for m in models if m in results}
         months = results['arima']['year_month'].tolist() if 'arima' in results else []
         prev   = int(self._series.values[-1]) if len(self._series) else 0
+
+        # חישוב accuracy לכל מודל לפני שנכנסים ללולאה
+        metrics = results.get('metrics') or {}
+        hist_mean = float(self._series.mean()) if len(self._series) else 0.0
+        model_accuracy: dict[str, float | None] = {}
+        for m in models:
+            mae = metrics.get(m, {}).get('mae') if isinstance(metrics, dict) else None
+            model_accuracy[m] = self._accuracy_pct(mae, hist_mean)
+        valid_accs = [a for a in model_accuracy.values() if a is not None]
+        avg_accuracy = sum(valid_accs) / len(valid_accs) if valid_accs else None
+
         self.fc_table.setRowCount(len(months))
         for row, ym in enumerate(months):
             vals = [int(dfs[m].loc[ym,'forecast'])
@@ -1108,6 +1157,10 @@ class ForecastTab(QWidget):
             lo    = int(dfs['arima'].loc[ym,'lower']) if 'arima' in dfs and ym in dfs['arima'].index else avg
             hi    = int(dfs['arima'].loc[ym,'upper']) if 'arima' in dfs and ym in dfs['arima'].index else avg
             pct   = round((avg-prev)/prev*100,1) if prev else 0
+            acc_txt = f"{avg_accuracy:.0f}%" if avg_accuracy is not None else "—"
+            # צבע ה-accuracy: ירוק >=70%, כתום 50-70%, אדום <50%
+            acc_color = ('#27ae60' if (avg_accuracy or 0) >= 70 else
+                         '#e67e22' if (avg_accuracy or 0) >= 50 else '#e74c3c')
             cells = [
                 (ym,             '#2c3e50', False, False),
                 (str(vals[0]),   '#3498db', True,  False),
@@ -1117,6 +1170,7 @@ class ForecastTab(QWidget):
                 (f"{lo}–{hi}",   '#7f8c8d', True,  False),
                 (f"{'+' if pct>=0 else ''}{pct}%",
                  '#27ae60' if pct>=0 else '#e74c3c', True, False),
+                (acc_txt,        acc_color, True,  True),
             ]
             for col,(txt,clr,ctr,bold) in enumerate(cells):
                 it = QTableWidgetItem(txt)
@@ -1126,9 +1180,15 @@ class ForecastTab(QWidget):
                 if bold: it.setBackground(QColor('#eaf4fb'))
                 if bold:
                     f=QFont(); f.setBold(True); it.setFont(f)
+                # ה-"שינוי %" קטן יותר מהשאר
+                if col == 6:
+                    fnt = QFont(); fnt.setPointSize(10); it.setFont(fnt)
                 self.fc_table.setItem(row, col, it)
             prev = avg
         self.fc_table.resizeColumnsToContents()
+
+        # שמירת ה-accuracy ל-legend (ייקרא ב-plot)
+        self._model_accuracy = model_accuracy
 
     def _fill_nv(self, nv):
         for k, lbl in self.nv_vals.items():
