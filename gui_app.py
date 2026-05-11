@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 import sys
-from qtpy.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel, QMessageBox, QHBoxLayout
+from qtpy.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel, QMessageBox,
+    QHBoxLayout, QTabWidget,
+)
 from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 
 from logger import logger
@@ -12,11 +15,6 @@ from tabs.inventory_analysis_tab import InventoryAnalysisTab
 from tabs.unidentified_products_tab import UnidentifiedProductsTab
 from tabs.updates_tab import UpdatesTab
 from forecast_tab import ForecastTab
-
-try:
-    from qtpy.QtWidgets import QTabWidget
-except ImportError:
-    from qtpy.QtWidgets import QTabWidget
 
 
 class HealthCheckWorker(QThread):
@@ -104,11 +102,20 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     def _run_health_checks(self):
+        # bootstrap-check בלבד: וודא ש-DB נגיש ושטבלת-מפתח אחת קיימת.
+        # יצירת/עדכון schema הוא תהליך נפרד דרך migrate.py — לא מתבצע כאן.
         try:
-            from db_setup import setup_db
-            ok = setup_db(verbose=False)
-            if not ok:
-                raise RuntimeError("setup_db returned False")
+            from db_config import get_conn
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_name = 'documents' LIMIT 1
+                    """)
+                    if cur.fetchone() is None:
+                        raise RuntimeError(
+                            "טבלת documents לא קיימת. הרץ: python migrate.py"
+                        )
             self._set_status(self._db_dot, self._db_lbl, True, "DB: מחובר")
             logger.info("health_check DB: OK")
         except Exception as e:

@@ -20,7 +20,7 @@ class InventoryWorker(QThread):
     def run(self):
         try:
             from inventory_manager import fetch_partbal_inventory
-            from product_identification import identify_luggage
+            from domain_repository import identify_luggage
 
             def _prog(n):
                 self.progress.emit(f"נמשכו {n} רשומות…")

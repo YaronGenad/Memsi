@@ -41,7 +41,6 @@ a = Analysis(
         'statsmodels.tsa.statespace.sarimax',
         'prophet',
         'xgboost',
-        'sklearn',
         'tenacity',
         'bidi',
         'bidi.algorithm',

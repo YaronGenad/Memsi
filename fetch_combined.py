@@ -3,17 +3,17 @@ import pandas as pd
 import calendar
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from pricing_data import get_repair_price, is_repair_item, get_replacement_price
-from product_identification import identify_luggage
+from domain_repository import (
+    get_repair_price, is_repair_item, get_replacement_price,
+    identify_luggage, list_customers,
+)
 from cache_manager import CacheManager
 from logger import logger
 
 import os
-from pathlib import Path
-from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-load_dotenv(Path(__file__).parent / '.env')
+# load_dotenv כבר רץ ב-db_config.py בעת import.
 
 AUTH_HEADER   = os.environ['PRIORITY_AUTH_HEADER']
 _BASE_URL     = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema')
@@ -31,12 +31,14 @@ _RETRY = retry(
     reraise=True,
 )
 
-TARGET_CUSTOMERS = [
-    '360010009', '360010035', '360250034', '360250041', '360040004',
-    '360050004', '360250026', '360200017', '360250040', '360250014',
-    '360250027', '360250029', '360250028', '360250031', '360250032',
-    '360250030', '360250038', '360250039', '360190002', '360250033'
-]
+
+def get_target_customers() -> list[str]:
+    """מחזיר את רשימת הלקוחות הפעילים שמהם מושכים נתונים. נטען lazy מה-DB."""
+    return [c['code'] for c in list_customers() if c.get('is_active', True)]
+
+
+# תאימות-לאחור: השם _target_customers נשמר כ-alias
+_target_customers = get_target_customers
 
 def _fetch_odata_all(url: str, params: dict, progress=None) -> list:
     """שולף כל הדפים מ-OData endpoint עם $top/$skip pagination.
@@ -69,7 +71,7 @@ def _fetch_odata_all(url: str, params: dict, progress=None) -> list:
 
 
 def fetch_documents(start_date, end_date, progress=None):
-    customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in TARGET_CUSTOMERS])
+    customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in _target_customers()])
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})"
     }
@@ -79,7 +81,7 @@ def fetch_documents(start_date, end_date, progress=None):
 
 
 def fetch_logfile(start_date, end_date, progress=None):
-    customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in TARGET_CUSTOMERS])
+    customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in _target_customers()])
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})"
     }

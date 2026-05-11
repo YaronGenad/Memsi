@@ -9,7 +9,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 from dateutil.relativedelta import relativedelta
 
-from fetch_combined import fetch_with_cache, combine_data, TARGET_CUSTOMERS
+from fetch_combined import fetch_with_cache, combine_data, get_target_customers
 
 
 class MultiMonthReportWorker(QThread):
@@ -63,7 +63,7 @@ class AirlineReportTab(QWidget):
         customers_layout = QVBoxLayout()
         self.customers_list = QListWidget()
         self.customers_list.setSelectionMode(QListWidget.MultiSelection)
-        for customer_id in TARGET_CUSTOMERS:
+        for customer_id in get_target_customers():
             self.customers_list.addItem(customer_id)
         customers_layout.addWidget(self.customers_list)
         customers_group.setLayout(customers_layout)
