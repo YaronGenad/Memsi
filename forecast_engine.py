@@ -30,8 +30,98 @@ warnings.filterwarnings('ignore')
 #    "1" - גרסה התחלתית.
 #    "2" - C1: הסרת is_routine מ-Prophet, פישוט features ב-XGBoost,
 #          rolling residual std (12 חודשים), טעינת חגים דינמית מ-pyluach.
+#    "3" - C2.5: הוספת flight_volume_lagged ו-conversion_regime כ-features
+#          ל-XGBoost ו-Prophet. flight_volume normalized ל-baseline, regime
+#          מקודד כ-numeric (LOW=0, MEDIUM=1, HIGH=2).
 # ────────────────────────────────────────────────
-MODEL_VERSION = "2"
+MODEL_VERSION = "3"
+
+
+# ────────────────────────────────────────────────
+#  Cache להעשרת features מ-DB (flight_traffic + conversion_regime)
+# ────────────────────────────────────────────────
+_flight_cache: dict[str, float] = {}
+_regime_cache: dict[str, str] = {}
+_features_cache_loaded: bool = False
+
+
+_REGIME_TO_NUM = {'LOW': 0.0, 'MEDIUM': 1.0, 'HIGH': 2.0}
+
+
+def _load_features_cache() -> None:
+    """טוען פעם אחת את flight_traffic + conversion_regime מ-DB. cache בזיכרון
+    כי הנתונים האלה משתנים רק פעם בחודש (אחרי IAA sync).
+
+    נשמר ברמת המודול כדי שגם cells מרובים באותה ריצה ישתמשו באותו נתון.
+    invalidate() מתבצע על-ידי בדיקת אם flight_traffic.year_month האחרון השתנה.
+    """
+    global _flight_cache, _regime_cache, _features_cache_loaded
+    if _features_cache_loaded:
+        return
+    try:
+        from db_config import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT year_month, arriving_passengers
+                    FROM flight_traffic
+                    WHERE arriving_passengers IS NOT NULL
+                """)
+                _flight_cache = {ym: float(v) for ym, v in cur.fetchall()}
+                cur.execute("""
+                    SELECT year_month, conversion_regime
+                    FROM forecast_events
+                    WHERE conversion_regime IS NOT NULL
+                """)
+                _regime_cache = {ym: r for ym, r in cur.fetchall()}
+        _features_cache_loaded = True
+        logger.info("features cache loaded: flights=%d, regimes=%d",
+                    len(_flight_cache), len(_regime_cache))
+    except Exception:
+        logger.exception("failed to load features cache; falling back to defaults")
+        _flight_cache = {}
+        _regime_cache = {}
+        _features_cache_loaded = True  # לא לנסות שוב לכל cell
+
+
+def invalidate_features_cache() -> None:
+    """לקריאה אחרי IAA sync או שינוי ידני ב-regimes."""
+    global _features_cache_loaded
+    _features_cache_loaded = False
+
+
+def _flight_baseline() -> float:
+    """ממוצע 3 חודשים אחרונים של arriving_passengers, ל-normalization."""
+    _load_features_cache()
+    if not _flight_cache:
+        return 700_000.0
+    last_3 = sorted(_flight_cache.keys())[-3:]
+    return sum(_flight_cache[k] for k in last_3) / len(last_3)
+
+
+def _flight_volume_for(ym: str, fallback: float | None = None) -> float:
+    """מחזיר arriving_passengers ל-year_month, מנורמלל ל-baseline.
+    אם חסר — fallback ל-1.0 (כלומר baseline)."""
+    _load_features_cache()
+    if ym in _flight_cache:
+        baseline = _flight_baseline()
+        return _flight_cache[ym] / baseline if baseline > 0 else 1.0
+    if fallback is not None:
+        return fallback
+    return 1.0
+
+
+def _regime_for(ym: str, default: str = 'LOW') -> float:
+    """מחזיר conversion_regime ל-year_month ככערך מספרי. ברירת-מחדל = LOW (0)."""
+    _load_features_cache()
+    regime = _regime_cache.get(ym, default)
+    return _REGIME_TO_NUM.get(regime, 0.0)
+
+
+def _prev_month(ym: str) -> str:
+    """'2026-04' → '2026-03'. עוטף date arithmetic ב-helper קצר."""
+    dt = datetime.strptime(ym + '-01', '%Y-%m-%d') - relativedelta(months=1)
+    return dt.strftime('%Y-%m')
 
 
 # ────────────────────────────────────────────────
@@ -207,13 +297,22 @@ def forecast_prophet(series: pd.Series, horizon: int,
         left_on='ym', right_on='year_month', how='left'
     ).fillna(0)
 
+    # Sprint C2.5: flight_lag1 ו-regime כ-regressors. flight_lag1 הוא
+    # ה-causal driver העיקרי (נחיתות חודש קודם → תיקונים החודש).
+    # regime מקודד את הרגישות (LOW/MEDIUM/HIGH = 0/1/2).
+    df_train['flight_lag1'] = df_train['ym'].apply(
+        lambda y: _flight_volume_for(_prev_month(y)))
+    df_train['flight_curr'] = df_train['ym'].apply(_flight_volume_for)
+    df_train['regime'] = df_train['ym'].apply(_regime_for)
+
     # הערה (Sprint C1): is_routine הוסר. הוא היה בדיוק
     # 1 - (is_war + is_military_op + is_ceasefire), כלומר collinearity
     # מובנית עם שלושת הדגלים האחרים. Prophet היה משייט בקואפיציינטים שלא
     # ניתנים לפירוש. עכשיו רק שלושת הדגלים העצמאיים.
     regressor_cols = ['is_war','is_military_op','is_ceasefire',
                       'jewish_holiday','is_summer_peak',
-                      'is_black_friday']
+                      'is_black_friday',
+                      'flight_lag1','flight_curr','regime']
 
     m = Prophet(yearly_seasonality=False, weekly_seasonality=False,
                 daily_seasonality=False, interval_width=0.8,
@@ -225,10 +324,18 @@ def forecast_prophet(series: pd.Series, horizon: int,
 
     future = pd.DataFrame({'ds': pd.to_datetime([mn + "-01" for mn in months])})
     future['ym'] = future['ds'].dt.strftime('%Y-%m')
+    # ל-future: ה-events הסטנדרטיים מוזרקים מ-all_ev, וה-flight+regime
+    # מחושבים מ-DB cache עם fallback אם החודש העתידי לא קיים שם.
     future = future.merge(
-        all_ev[['year_month'] + regressor_cols],
+        all_ev[['year_month','is_war','is_military_op','is_ceasefire',
+                'jewish_holiday','is_summer_peak','is_black_friday']],
         left_on='ym', right_on='year_month', how='left'
     ).fillna(0)
+    ctx_regime_num = _REGIME_TO_NUM.get(context.get('conversion_regime', 'LOW'), 0.0)
+    future['flight_lag1'] = future['ym'].apply(
+        lambda y: _flight_volume_for(_prev_month(y)))
+    future['flight_curr'] = future['ym'].apply(_flight_volume_for)
+    future['regime'] = ctx_regime_num  # לעתיד — לקחת מה-context, לא מ-DB
 
     fc = m.predict(future[['ds'] + regressor_cols])
     hist_cap = max(series.values) * 2
@@ -257,6 +364,14 @@ def _build_features(series: pd.Series, events_df: pd.DataFrame) -> pd.DataFrame:
         # sin_month/cos_month מקודדים עונתיות חודשית באופן רציף.
         # is_summer_peak (Jul/Aug) חופף עם sin/cos. is_routine היה
         # collinear עם is_war/military_op/ceasefire.
+        # Sprint C2.5: flight_volume_lag1 = נחיתות חודש קודם, מנורמללות לבייסליין.
+        # הטענה הסיבתית: ביקוש לתיקונים בחודש N מונע מנחיתות בחודש N-1 (lag
+        # של 2-4 שבועות בין נחיתה לתיקון). conversion_regime מקודד את הרגישות.
+        prev_ym = yms[i-1] if i > 0 else ym
+        flight_lag1 = _flight_volume_for(prev_ym)
+        flight_curr = _flight_volume_for(ym)
+        regime_num  = _regime_for(ym)
+
         row = {
             'sin_month':      np.sin(2 * np.pi * m / 12),
             'cos_month':      np.cos(2 * np.pi * m / 12),
@@ -272,6 +387,9 @@ def _build_features(series: pd.Series, events_df: pd.DataFrame) -> pd.DataFrame:
             'lag12':          float(series.iloc[i-12]) if i >= 12 else float(np.mean(series.values)),
             'roll3_mean':     float(np.mean(series.values[max(0,i-3):i])) if i > 0 else 0,
             'roll6_mean':     float(np.mean(series.values[max(0,i-6):i])) if i > 0 else 0,
+            'flight_lag1':    flight_lag1,
+            'flight_curr':    flight_curr,
+            'regime':         regime_num,
             'target':         float(series.iloc[i]),
         }
         rows.append(row)
@@ -286,12 +404,13 @@ def forecast_xgboost(series: pd.Series, horizon: int,
     ev_idx  = all_ev.drop_duplicates(subset='year_month', keep='last').set_index('year_month')
     months  = _future_months(series.index[-1], horizon)
 
-    # פיצ'רים אחרי C1 cleanup (ראה הערה ב-_build_features).
+    # פיצ'רים אחרי C2.5: נוספו flight_lag1/flight_curr/regime.
     feat_cols = ['sin_month','cos_month',
                  'is_war','is_military_op','is_ceasefire',
                  'jewish_holiday','travel_num',
                  'is_black_friday',
-                 'lag1','lag2','lag3','lag12','roll3_mean','roll6_mean']
+                 'lag1','lag2','lag3','lag12','roll3_mean','roll6_mean',
+                 'flight_lag1','flight_curr','regime']
 
     df_feat = _build_features(series, all_ev)
     X_train = df_feat[feat_cols].values
@@ -303,12 +422,21 @@ def forecast_xgboost(series: pd.Series, horizon: int,
     model.fit(X_train, y_train)
 
     # חיזוי איטרטיבי — כל חודש מוסיף ל-series. הסדר חייב להתאים ל-feat_cols.
+    # flight features: לקחת מנתוני flight_traffic אם זמינים, אחרת fallback ל-1.0
+    # (כלומר baseline). regime: נלקח מ-context אם קיים, אחרת ברירת-מחדל LOW.
+    last_hist_ym = series.index[-1]
+    ctx_regime = context.get('conversion_regime', 'LOW')
+    ctx_regime_num = _REGIME_TO_NUM.get(ctx_regime, 0.0)
+
     extended = list(series.values.astype(float))
     preds    = []
+    prev_ym  = last_hist_ym
     for i, ym in enumerate(months):
         m = int(ym[5:7])
         n = len(extended)
         ev_row = ev_idx.loc[ym] if ym in ev_idx.index else pd.Series(dtype=float)
+        flight_lag1 = _flight_volume_for(prev_ym)
+        flight_curr = _flight_volume_for(ym)
         row = [[
             np.sin(2*np.pi*m/12), np.cos(2*np.pi*m/12),
             float(ev_row.get('is_war',0)),
@@ -322,10 +450,12 @@ def forecast_xgboost(series: pd.Series, horizon: int,
             extended[-12] if n>=12 else float(np.mean(extended)),
             float(np.mean(extended[-3:])) if n>0 else 0,
             float(np.mean(extended[-6:])) if n>0 else 0,
+            flight_lag1, flight_curr, ctx_regime_num,
         ]]
         pred = float(model.predict(row)[0])
         preds.append(pred)
         extended.append(pred)
+        prev_ym = ym
 
     # רווח אמון — std של שגיאות 12 חודשים אחרונים (rolling). std גלובלי
     # על כל ה-train היה מתעלם מהעובדה שעונת השוק יכולה לעבור חוסר-יציבות
