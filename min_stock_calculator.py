@@ -15,9 +15,15 @@ min_stock_calculator.py — מלאי מינימום מומלץ פר (סניף ×
     rate_12m = יציאות ל-365 ימים אחרונים / 365
     rate_used = max(rate_1m, rate_3m)  ← מבטיח שלא נחסר ב-spike-נוכחי
 
-מלאי מינימום:
-    min_stock = max(1, ceil(rate_used × lead_time_days × 1.5))
-    1.5 = safety factor. 1 = ברירת-מחדל מינימום.
+מלאי מינימום — Poisson-based safety stock (95th percentile):
+    expected  = rate_used × lead_time_days   ← ביקוש-צפוי בתקופת אספקה
+    safety    = 1.65 × sqrt(expected)        ← buffer ל-spike (z=1.65 = 95%)
+    min_stock = max(1, ceil(expected + safety))
+
+ההיגיון: אם הקצב הוא 5/חודש (~1.2 לשבוע) ו-lead=4 ימים, expected=0.67
+אבל variance של Poisson גורם לכך שב-95% מהמקרים הביקוש לא יעבור
+expected + 1.65×sqrt(expected) ≈ 2. לכן מינימום=2 (לא 1). זה תופס
+את ה-spike של "שני לקוחות הגיעו באותו שבוע" שמנוסחה דטרמיניסטית פספסה.
 """
 from __future__ import annotations
 import math
@@ -208,7 +214,7 @@ def _current_inventory() -> dict[tuple[str, str], float]:
 #  Main
 # ============================================================
 def compute_min_stock(lead_time_days: int = 7,
-                     safety_factor: float = 1.5) -> pd.DataFrame:
+                     z_score: float = 1.65) -> pd.DataFrame:
     """מחשב טבלת המלצת מלאי-מינימום.
 
     החזרה: DataFrame עם עמודות:
@@ -281,7 +287,10 @@ def compute_min_stock(lead_time_days: int = 7,
         rate_3m  = max(s3, 0) / 90.0
         rate_12m = max(s12, 0) / 365.0
         rate_used = max(rate_1m, rate_3m)
-        recommended_min = max(1, math.ceil(rate_used * lead_time_days * safety_factor))
+        # Poisson safety-stock: expected + z × sqrt(expected). z=1.65 = 95%.
+        expected = rate_used * lead_time_days
+        safety = z_score * math.sqrt(expected) if expected > 0 else 0
+        recommended_min = max(1, math.ceil(expected + safety))
 
         current = cat_inv.get((branch, category), 0.0)
 
