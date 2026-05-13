@@ -183,10 +183,13 @@ class MinStockTab(QWidget):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(df))
 
-        # rate הוא יחידות-ליום. ערך תחת 1 — מציג "<1" כי הקצב פחות
-        # ממזוודה אחת ליום (לעיתים קרובות שברים נמוכים מאוד).
-        def _fmt_rate(r: float) -> str:
-            return "<1" if r < 1 else f"{r:.2f}"
+        # קצבים בטבלה הם פר-יום. ההצגה היא ממוצע-לחודש (× 30),
+        # שזה מה שמנהל-מלאי חושב במונחיו. ערך < 1 מוצג כ-"<1".
+        def _fmt_monthly(daily_rate: float) -> str:
+            monthly = daily_rate * 30.0
+            if monthly < 1:
+                return "<1"
+            return f"{monthly:.1f}"
 
         for i, (_, row) in enumerate(df.iterrows()):
             branch = str(row['branch'])
@@ -196,9 +199,9 @@ class MinStockTab(QWidget):
                 branch,
                 branch_name,
                 row['category'] or '',
-                _fmt_rate(row['rate_1m']),
-                _fmt_rate(row['rate_3m']),
-                _fmt_rate(row['rate_12m']),
+                _fmt_monthly(row['rate_1m']),
+                _fmt_monthly(row['rate_3m']),
+                _fmt_monthly(row['rate_12m']),
                 f"{row['current_stock']:.0f}",
                 str(row['recommended_min']),
                 f"{row['gap']:+.0f}",
