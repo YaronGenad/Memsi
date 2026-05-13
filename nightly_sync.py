@@ -149,6 +149,31 @@ def sync_flight_schedule(lg: logging.Logger) -> dict:
     }
 
 
+def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
+    """Sprint B2: מעדכן kit_bom (BOM של סטים) ואת local_inventory
+    (מלאי-אמיתי אחרי פירוק). ה-BOM משתנה לאט; מעדכנים אותו רק פעם בשבוע
+    כדי לא להעמיס."""
+    from datetime import date
+    from kit_bom_builder import rebuild_bom
+    from local_inventory_calculator import rebuild_local_inventory
+
+    out = {}
+    # BOM rebuild — פעם בשבוע (יום ראשון)
+    if date.today().weekday() == 6:  # Sunday in Python (Mon=0)
+        lg.info("sync_kit_bom: weekly rebuild")
+        r = rebuild_bom(lg=lg)
+        out['bom_kits'] = r.get('kits', 0)
+        out['bom_pairs'] = r.get('wrote', 0)
+    else:
+        out['bom_kits'] = 'skipped'
+        out['bom_pairs'] = 'skipped'
+
+    lg.info("sync_local_inventory: starting")
+    r = rebuild_local_inventory(lg=lg)
+    out['local_inv_rows'] = r.get('rows', 0)
+    return out
+
+
 # ────────────────────────────────────────────────
 #  Orchestration עם sync_runs tracking
 # ────────────────────────────────────────────────
@@ -177,6 +202,7 @@ def run_full(days: int = 30, skip_iaa: bool = False,
 
     _step('priority_rolling', sync_priority_rolling, days=days, lg=lg)
     _step('partbal',          sync_partbal,          lg=lg)
+    _step('kit_bom_inv',      sync_kit_bom_and_inventory, lg=lg)
     if not skip_iaa:
         _step('iaa',              sync_iaa,              lg=lg)
         _step('flight_schedule',  sync_flight_schedule,  lg=lg)
