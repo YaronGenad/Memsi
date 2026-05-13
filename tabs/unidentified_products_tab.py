@@ -12,8 +12,11 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt
 
+from datetime import datetime
+
 from fetch_combined import fetch_with_cache, combine_data
 import domain_repository as repo
+from db_config import get_conn
 
 from tabs._base import BaseTabWorker, format_error_for_user
 from tabs._widgets import DateRangePicker
@@ -83,6 +86,16 @@ class UnidentifiedProductsTab(QWidget):
         self.import_btn.clicked.connect(self._import_and_update)
         layout.addWidget(self.import_btn)
 
+        self.export_identified_btn = QPushButton("ייצא רשימת מוצרים מזוהים")
+        self.export_identified_btn.setStyleSheet("""
+            QPushButton { background-color:#2980b9; color:white; font-size:18px;
+                          font-weight:bold; padding:15px; border-radius:8px; }
+            QPushButton:hover { background-color:#21618c; }
+            QPushButton:disabled { background-color:#bdc3c7; }
+        """)
+        self.export_identified_btn.clicked.connect(self._export_identified)
+        layout.addWidget(self.export_identified_btn)
+
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
         self.status_text.setStyleSheet("background-color:#ecf0f1; font-family:Consolas;")
@@ -131,6 +144,60 @@ class UnidentifiedProductsTab(QWidget):
         self.export_btn.setEnabled(True)
         self.status_text.append(f"\nשגיאה:\n{tb[:600]}")
         QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
+
+    # --- export identified --------------------------------------
+    def _export_identified(self):
+        """מייצא ל-Excel את כל המוצרים שיש להם זיהוי-קטגוריה ב-DB.
+        מסודר לפי קטגוריה, ואז לפי תיאור."""
+        self.export_identified_btn.setEnabled(False)
+        self.status_text.clear()
+        try:
+            with get_conn() as conn:
+                df = pd.read_sql_query("""
+                    SELECT category    AS "קטגוריה",
+                           description AS "תיאור מוצר",
+                           updated_by  AS "עודכן ע""י",
+                           updated_at  AS "תאריך עדכון"
+                    FROM luggage_identification
+                    ORDER BY category, description
+                """, conn)
+
+            if df.empty:
+                self.status_text.append("אין מוצרים מזוהים ב-DB.")
+                QMessageBox.information(self, "מידע", "אין מוצרים מזוהים ב-DB.")
+                return
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"identified_products_{ts}.xlsx"
+            path, _ = QFileDialog.getSaveFileName(
+                self, "שמירה כאקסל", default_name, "Excel (*.xlsx)"
+            )
+            if not path:
+                return
+
+            # תאריך-עדכון לפורמט קריא (בלי timezone במחרוזת)
+            df['תאריך עדכון'] = pd.to_datetime(df['תאריך עדכון']).dt.tz_localize(None)
+
+            with pd.ExcelWriter(path, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='מוצרים מזוהים', index=False)
+                # גם summary לפי קטגוריה
+                summary = (df.groupby('קטגוריה').size()
+                             .reset_index(name='מספר מוצרים')
+                             .sort_values('מספר מוצרים', ascending=False))
+                summary.to_excel(writer, sheet_name='סיכום לפי קטגוריה', index=False)
+
+            self.status_text.append(
+                f"✓ יוצאו {len(df)} מוצרים ב-{df['קטגוריה'].nunique()} קטגוריות"
+                f"\nלקובץ: {path}"
+            )
+            QMessageBox.information(self, "הצלחה",
+                                    f"יוצאו {len(df)} מוצרים מזוהים.\n{path}")
+        except Exception as e:
+            import traceback
+            self.status_text.append(f"\nשגיאה: {e}")
+            QMessageBox.critical(self, "שגיאה", format_error_for_user(traceback.format_exc()))
+        finally:
+            self.export_identified_btn.setEnabled(True)
 
     # --- import -------------------------------------------------
     def _import_and_update(self):
