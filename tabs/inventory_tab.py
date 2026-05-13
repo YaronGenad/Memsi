@@ -11,32 +11,113 @@ from logger import logger
 
 
 class InventoryWorker(QThread):
+    """Worker for fetching inventory in one of three view modes.
+
+    view_mode:
+        'raw'      — PARTBAL מ-Priority, גלם. הסטים והרכיבים שניהם מוצגים.
+        'unified'  — local_inventory מה-DB, אחרי פירוק-סטים. רק רכיבים.
+        'category' — סיכום לקטגוריה (identify_luggage). אגרגציה על-פני
+                     מק"טים מאותה קטגוריה, פר-מחסן.
+    """
     progress = pyqtSignal(str)
-    finished = pyqtSignal(object)   # pd.DataFrame with 'זיהוי מזוודה' column
+    finished = pyqtSignal(object)   # pd.DataFrame
     error    = pyqtSignal(str)
 
-    def __init__(self, warehouse_filter):
+    def __init__(self, warehouse_filter, view_mode: str = 'raw'):
         super().__init__()
         self.warehouse_filter = warehouse_filter
+        self.view_mode = view_mode
 
     def run(self):
         try:
-            from inventory_manager import fetch_partbal_inventory
             from domain_repository import identify_luggage
 
-            def _prog(n):
-                self.progress.emit(f"נמשכו {n} רשומות…")
+            if self.view_mode == 'raw':
+                df = self._fetch_raw()
+            else:
+                df = self._fetch_unified()
 
-            df = fetch_partbal_inventory(self.warehouse_filter, progress_callback=_prog)
-            if not df.empty:
-                self.progress.emit("מזהה סוגי מוצרים…")
-                df = df.copy()
-                df['זיהוי מזוודה'] = df['תיאור מוצר'].apply(identify_luggage)
+            if df.empty:
+                self.finished.emit(df)
+                return
+
+            self.progress.emit("מזהה סוגי מוצרים…")
+            df = df.copy()
+            df['זיהוי מזוודה'] = df['תיאור מוצר'].apply(identify_luggage)
+
+            if self.view_mode == 'category':
+                df = self._aggregate_by_category(df)
+
             self.finished.emit(df)
         except Exception:
             import traceback
-            logger.exception("InventoryWorker failed")
+            logger.exception("InventoryWorker failed (mode=%s)", self.view_mode)
             self.error.emit(traceback.format_exc())
+
+    def _fetch_raw(self):
+        from inventory_manager import fetch_partbal_inventory
+        def _prog(n):
+            self.progress.emit(f"נמשכו {n} רשומות…")
+        return fetch_partbal_inventory(self.warehouse_filter, progress_callback=_prog)
+
+    def _fetch_unified(self):
+        """קורא מ-local_inventory ב-DB. ה-DB מתעדכן ע"י nightly_sync.
+        משלב תיאורי-מוצר מטבלת logfile (cache של עסקאות-עבר)."""
+        import pandas as pd
+        from db_config import get_conn
+
+        self.progress.emit("טוען מלאי מאוחד מ-DB…")
+        warehouses = self.warehouse_filter or []
+        with get_conn() as conn:
+            if warehouses:
+                wh_list = ",".join(f"'{w}'" for w in warehouses)
+                q = f"""
+                    SELECT li.warehouse_code AS "מחסן",
+                           li.sku            AS "מקט",
+                           li.quantity       AS "יתרה"
+                    FROM local_inventory li
+                    WHERE li.warehouse_code IN ({wh_list})
+                """
+            else:
+                q = """
+                    SELECT warehouse_code AS "מחסן",
+                           sku            AS "מקט",
+                           quantity       AS "יתרה"
+                    FROM local_inventory
+                """
+            df = pd.read_sql_query(q, conn)
+            if df.empty:
+                return df
+
+            # תיאור-מוצר: נמשוך מ-logfile (cache). אחד-לכל-מק"ט.
+            self.progress.emit("מצרף תיאורי מוצרים…")
+            desc = pd.read_sql_query("""
+                SELECT DISTINCT ON (partname) partname AS "מקט", topartdes AS "תיאור מוצר"
+                FROM logfile
+                WHERE topartdes IS NOT NULL
+                ORDER BY partname, curdate DESC
+            """, conn)
+
+        df = df.merge(desc, on='מקט', how='left')
+        df['תיאור מוצר'] = df['תיאור מוצר'].fillna('')
+        # קוד-ספק וספק לא קיימים ב-local_inventory; ריקים לתאימות
+        df['קוד ספק'] = ''
+        df['ספק'] = ''
+
+        return df[['מחסן', 'מקט', 'תיאור מוצר', 'יתרה', 'קוד ספק', 'ספק']]
+
+    def _aggregate_by_category(self, df):
+        """אגרגציה לפי (warehouse × category)."""
+        import pandas as pd
+        df_known = df[df['זיהוי מזוודה'].notna() & (df['זיהוי מזוודה'] != '')]
+        if df_known.empty:
+            return pd.DataFrame(columns=['מחסן', 'קטגוריה', 'כמות'])
+        agg = (df_known
+               .groupby(['מחסן', 'זיהוי מזוודה'])['יתרה']
+               .sum()
+               .reset_index()
+               .rename(columns={'זיהוי מזוודה': 'קטגוריה', 'יתרה': 'כמות'}))
+        return agg.sort_values(['מחסן', 'קטגוריה'])
 
 
 class InventoryTab(QWidget):
@@ -79,6 +160,22 @@ class InventoryTab(QWidget):
 
         warehouse_group.setLayout(warehouse_layout)
         layout.addWidget(warehouse_group)
+
+        # Sprint B2: בחירת תצוגה
+        from qtpy.QtWidgets import QRadioButton, QButtonGroup
+        view_group = QGroupBox("סוג תצוגה")
+        vl = QHBoxLayout()
+        self.rb_raw      = QRadioButton("גולמי (מ-Priority)")
+        self.rb_unified  = QRadioButton("מאוחד (אחרי פירוק סטים)")
+        self.rb_category = QRadioButton("סיכום לפי קטגוריה")
+        self.rb_raw.setChecked(True)
+        self._view_group = QButtonGroup(self)
+        for rb in (self.rb_raw, self.rb_unified, self.rb_category):
+            self._view_group.addButton(rb)
+            vl.addWidget(rb)
+        vl.addStretch()
+        view_group.setLayout(vl)
+        layout.addWidget(view_group)
 
         self.generate_btn = QPushButton("הפק דוח מלאי")
         self.generate_btn.setEnabled(False)
@@ -141,7 +238,14 @@ class InventoryTab(QWidget):
         self._current_data = None
         self.status_label.setText("מושך נתוני מלאי מ-Priority…")
 
-        self._worker = InventoryWorker(warehouse_filter)
+        # בחירת מצב-תצוגה
+        view_mode = 'raw'
+        if self.rb_unified.isChecked():
+            view_mode = 'unified'
+        elif self.rb_category.isChecked():
+            view_mode = 'category'
+
+        self._worker = InventoryWorker(warehouse_filter, view_mode=view_mode)
         self._worker.progress.connect(self.status_label.setText)
         self._worker.finished.connect(self._on_inventory_done)
         self._worker.error.connect(self._on_inventory_error)
