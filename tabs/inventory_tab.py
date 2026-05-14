@@ -281,9 +281,13 @@ class InventoryTab(QWidget):
         self.table.setVisible(True)
         self.export_btn.setVisible(True)
 
-        identified = df['זיהוי מזוודה'].notna().sum()
-        self.status_label.setText(
-            f"✓ {len(df)} שורות | מזוהים: {identified} | לא מזוהים: {len(df) - identified}")
+        # 'סיכום לפי קטגוריה' לא מחזיק עמודת זיהוי מזוודה (כל שורה היא כבר זיהוי).
+        if 'זיהוי מזוודה' in df.columns:
+            identified = df['זיהוי מזוודה'].notna().sum()
+            self.status_label.setText(
+                f"✓ {len(df)} שורות | מזוהים: {identified} | לא מזוהים: {len(df) - identified}")
+        else:
+            self.status_label.setText(f"✓ {len(df)} שורות (סיכום לפי קטגוריה)")
 
     def _on_inventory_error(self, tb):
         self.generate_btn.setEnabled(True)
@@ -295,8 +299,19 @@ class InventoryTab(QWidget):
             return
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename  = f"inventory_report_{timestamp}.xlsx"
+        df = self._current_data.reset_index(drop=True)
+
+        # תצוגה 'סיכום' היא כבר אגרגציה — אין מה לסכם פעם נוספת.
+        if 'זיהוי מזוודה' not in df.columns:
+            try:
+                df.to_excel(filename, sheet_name='סיכום', index=False)
+                QMessageBox.information(self, "הצלחה", f"הקובץ נוצר בהצלחה!\n{filename}")
+            except Exception as e:
+                logger.exception("Export failed")
+                QMessageBox.critical(self, "שגיאה", str(e))
+            return
+
         try:
-            df = self._current_data.reset_index(drop=True)
             warehouses      = sorted(df['מחסן'].unique())
             identifications = sorted(df['זיהוי מזוודה'].dropna().unique())
 
