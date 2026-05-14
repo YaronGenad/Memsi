@@ -171,7 +171,7 @@ def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
     ה-BOM משתנה לאט; מעדכנים אותו רק פעם בשבוע כדי לא להעמיס."""
     from datetime import date
     from kit_bom_builder import rebuild_bom
-    from local_inventory_calculator import rebuild_local_inventory
+    from local_inventory_calculator import rebuild_local_inventory_from_partbal
     from logfile_full_sync import incremental_sync, initial_sync, classify_ic_docs
 
     out: dict = {}
@@ -207,8 +207,8 @@ def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
         out['bom_kits'] = 'skipped'
         out['bom_pairs'] = 'skipped'
 
-    lg.info("sync_local_inventory: starting")
-    r = rebuild_local_inventory(lg=lg)
+    lg.info("sync_local_inventory: starting (from PARTBAL — Priority is source of truth)")
+    r = rebuild_local_inventory_from_partbal(lg=lg)
     out['local_inv_rows'] = r.get('rows', 0)
     return out
 
