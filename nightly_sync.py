@@ -210,6 +210,16 @@ def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
     lg.info("sync_local_inventory: starting (from PARTBAL — Priority is source of truth)")
     r = rebuild_local_inventory_from_partbal(lg=lg)
     out['local_inv_rows'] = r.get('rows', 0)
+
+    # אגרגציה של forecast_history לחודשים האחרונים. בלי שזה רץ ב-nightly,
+    # התחזיות "מקבעות" על החודש האחרון שאוגרג ידנית — bug שגילינו ב-v0.13.5.
+    lg.info("sync_forecast_history: aggregating recent months")
+    from backfill_history import aggregate_recent_months
+    r = aggregate_recent_months(lookback_months=3)
+    out['forecast_history_months']   = r.get('months', 0)
+    out['forecast_history_rows']     = r.get('rows', 0)
+    out['forecast_history_newest']   = r.get('newest_month')
+
     return out
 
 

@@ -195,6 +195,16 @@ class ForecastDB:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM forecast_history WHERE branch = %s", (branch,))
 
+    def delete_history_for_month(self, year_month: str):
+        """מוחק את כל השורות של חודש מסוים. שימושי לפני re-aggregate
+        (כדי לתפוס מקרה שבו תעודה בוטלה והכמות צריכה להיות נמוכה יותר)."""
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM forecast_history WHERE year_month = %s",
+                    (year_month,)
+                )
+
     # ------------------------------------------------------------------ #
     #  forecast_events                                                     #
     # ------------------------------------------------------------------ #

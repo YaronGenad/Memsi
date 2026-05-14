@@ -13,7 +13,7 @@
 
 import time
 import calendar
-from datetime import datetime
+from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 
 from cache_manager import CacheManager
@@ -22,7 +22,8 @@ from domain_repository import identify_luggage
 from fetch_combined import fetch_documents, fetch_logfile
 
 BACKFILL_START = "2023-01"
-BACKFILL_END   = "2026-03"
+# BACKFILL_END = החודש הנוכחי (דינמי). אם רוצים להגביל ידנית — לשנות פה.
+BACKFILL_END   = date.today().strftime("%Y-%m")
 API_DELAY_SEC  = 2          # שניות המתנה בין קריאות API
 
 
@@ -133,6 +134,43 @@ def aggregate_month(cache: CacheManager, ym: str) -> list[dict]:
         {'branch': branch, 'luggage_type': lt, 'year_month': ym, 'quantity': qty}
         for (branch, lt), qty in counts.items()
     ]
+
+
+def aggregate_recent_months(lookback_months: int = 3) -> dict:
+    """API ל-nightly_sync. מאגרג את N החודשים האחרונים ל-forecast_history.
+
+    משתמש ב-cache הקיים (לא קורא ל-API). מחדש-אגרגציה של חודשים שקיימים
+    כדי לתפוס שינויי-נתונים שהגיעו ב-incremental sync (תיקונים רטרואקטיביים
+    של תעודות-לקוח-מבוטח, וכו').
+
+    מדלג על החודש הנוכחי אם הוא לא הסתיים — חודש חלקי יעוות את ההיסטוריה
+    כשמשתמשים בה לתחזית (החודש האחרון יראה כירידה דרסטית).
+    """
+    today = date.today()
+    # אם היום הוא ה-1 בחודש, החודש הקודם בדיוק הסתיים — מתחילים ממנו.
+    # אחרת, החודש הנוכחי חלקי — מתחילים מהקודם.
+    start_offset = 0 if today.day == 1 else 1
+    months_to_agg = []
+    for i in range(start_offset, start_offset + lookback_months):
+        d = today - relativedelta(months=i)
+        months_to_agg.append(d.strftime("%Y-%m"))
+
+    cache = CacheManager()
+    fdb = ForecastDB()
+    try:
+        total_rows = 0
+        for ym in sorted(months_to_agg):
+            # מחק קיים לפני re-aggregate (לטפל בתיקונים רטרואקטיביים)
+            fdb.delete_history_for_month(ym)
+            records = aggregate_month(cache, ym)
+            if records:
+                fdb.bulk_upsert_history(records)
+                total_rows += len(records)
+        return {'months': len(months_to_agg), 'rows': total_rows,
+                'oldest_month': months_to_agg[-1], 'newest_month': months_to_agg[0]}
+    finally:
+        cache.close()
+        fdb.close()
 
 
 def main():
