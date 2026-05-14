@@ -188,11 +188,13 @@ class ForecastChart(QWidget):
                 label='History', zorder=5)
         ax.axvline(x=hx[-1], color='#aaa', ls='--', lw=1, alpha=0.7)
 
+        # Sprint C4 (2026-05): השמות הפנימיים נשמרו (arima/prophet/xgboost)
+        # לתאימות API; אבל הם בעצם naive_prev / regime_naive / flight_rate.
         MODEL_CFG = [
-            ('arima',   '#3498db', 'ARIMA'),
-            ('prophet', '#27ae60', 'Prophet'),
-            ('xgboost', '#e67e22', 'XGBoost'),
-            ('causal',  '#9b59b6', 'Causal'),
+            ('arima',   '#3498db', 'חודש קודם'),
+            ('prophet', '#27ae60', 'מותאם-regime'),
+            ('xgboost', '#e67e22', 'תחזית-טיסות'),
+            ('causal',  '#9b59b6', 'נוסחה סיבתית'),
         ]
         # Sprint C2.5: legend מציג גם דיוק לכל מודל
         # (מחושב מ-MAE / mean(history)). מחזק את הקריאוּת של הגרף.
@@ -564,7 +566,7 @@ class ForecastTab(QWidget):
 
         self.fc_table = QTableWidget(0, 9)
         self.fc_table.setHorizontalHeaderLabels(
-            ["חודש","ARIMA","Prophet","XGBoost","Causal","ממוצע","טווח","שינוי %","דיוק תחזית"])
+            ["חודש","חודש קודם","מותאם-regime","תחזית-טיסות","סיבתי","ממוצע","טווח","שינוי %","דיוק תחזית"])
         self.fc_table.setMaximumHeight(165)
         self.fc_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.fc_table.setAlternatingRowColors(True)
@@ -672,7 +674,7 @@ class ForecastTab(QWidget):
         self.proc_table = QTableWidget(0, 7)
         self.proc_table.setHorizontalHeaderLabels([
             "קטגוריה","ממוצע היסט.",
-            "ARIMA","XGBoost","ממוצע מודלים",
+            "חודש קודם","תחזית-טיסות","ממוצע מודלים",
             "מלאי בטחון","מומלץ להזמין"])
         self.proc_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.proc_table.setAlternatingRowColors(True)
@@ -739,7 +741,7 @@ class ForecastTab(QWidget):
         self.snap_fc_chart.setMinimumHeight(320)
         self.snap_fc_table = QTableWidget(0, 7)
         self.snap_fc_table.setHorizontalHeaderLabels(
-            ["חודש","ARIMA","Prophet","XGBoost","ממוצע","טווח","שינוי %"])
+            ["חודש","חודש קודם","מותאם-regime","תחזית-טיסות","ממוצע","טווח","שינוי %"])
         self.snap_fc_table.setMinimumHeight(185)
         self.snap_fc_table.setMaximumHeight(230)
         self.snap_fc_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -1245,7 +1247,7 @@ class ForecastTab(QWidget):
 
     def _fill_desc(self, descs, metrics: dict | None = None):
         """מציג תיאור לכל מודל, ואם יש metrics מ-backtest, שורת אמינות צמודה."""
-        lmap = {'arima':'ARIMA','prophet':'Prophet','xgboost':'XGBoost','newsvendor':'Newsvendor'}
+        lmap = {'arima':'חודש קודם','prophet':'מותאם-regime','xgboost':'תחזית-טיסות','newsvendor':'Newsvendor'}
         metrics = metrics or {}
         parts = []
         for m, d in descs.items():
