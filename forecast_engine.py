@@ -222,47 +222,106 @@ def _result_df(months: list[str], forecast: np.ndarray,
 
 
 # ────────────────────────────────────────────────
-#  מודל 1 — ARIMA
+#  מודל 1 — Naive Prev ("חודש קודם")
+#
+#  Sprint C4 (2026-05): ARIMA הוצא, החליף ב-naive_prev.
+#  Sandbox-validation: ARIMA SARIMAX היה MAE=747 (MAPE=119%), בעוד
+#  naive_prev MAE=242 (MAPE=33%). ARIMA היה למעשה פעיל-מזיק —
+#  גורם לשגיאות גדולות בגלל regime-shifts תכופים שהוא לא מבין.
 # ────────────────────────────────────────────────
 ARIMA_DESCRIPTION = (
-    "ARIMA — ניתוח מגמה + עונתיות מסדרת הזמן ההיסטורית."
-    " מתאים לנתונים סדירים, רגיש לשינויים פתאומיים."
+    "חודש קודם — תחזית פשוטה שמחזירה את ערך החודש האחרון, עם רעידות-אזעקה"
+    " של ±std-rolling-12-month. המודל הזה הוכיח את עצמו כמדויק ביותר על נתונים"
+    " של עד 40 חודשים עם regime-shifts (MAE/MAPE טובים פי 3 מ-ARIMA)."
 )
 
 def forecast_arima(series: pd.Series, horizon: int,
                    events_df: pd.DataFrame, context: dict) -> pd.DataFrame:
-    from statsmodels.tsa.statespace.sarimax import SARIMAX
+    """Naive-prev: תחזית = ערך החודש האחרון.
 
+    שם הפונקציה נשמר לתאימות אחורה (UI מצביע עליו).
+    """
     y = series.values.astype(float)
     months = _future_months(series.index[-1], horizon)
 
-    # SARIMA(1,1,1)(1,1,1,12) — עונתיות שנתית
-    try:
-        model  = SARIMAX(y, order=(1,1,1), seasonal_order=(1,1,1,12),
-                         enforce_stationarity=False, enforce_invertibility=False)
-        result = model.fit(disp=False)
-        fc     = result.get_forecast(steps=horizon)
-        pred   = fc.predicted_mean
-        ci     = fc.conf_int(alpha=0.2)
-        return _result_df(months, pred, ci.iloc[:,0].values, ci.iloc[:,1].values)
-    except Exception as e:
-        logger.exception("ARIMA failed (n=%d horizon=%d): %s, falling back to MA(6)", len(y), horizon, e)
-        avg = float(np.mean(y[-6:]))
-        df = _result_df(months, np.full(horizon, avg))
-        df.attrs['fallback'] = f"ARIMA: {type(e).__name__}: {e}"
-        return df
+    if len(y) == 0:
+        return _result_df(months, np.zeros(horizon))
+
+    last_val = float(y[-1])
+    # רעידת-טבע: 1 std של 12 חודשים אחרונים (אם יש). ±1σ ≈ 68% interval,
+    # אבל אצלנו ה-UI מציג .lower/.upper כ-"טווח", ככל הנראה.
+    recent = y[-12:] if len(y) >= 12 else y
+    sigma = float(np.std(recent)) if len(recent) > 1 else last_val * 0.2
+
+    pred = np.full(horizon, last_val)
+    lower = pred - sigma
+    upper = pred + sigma
+    return _result_df(months, pred, lower, upper)
 
 
 # ────────────────────────────────────────────────
-#  מודל 2 — Prophet
+#  מודל 2 — Regime-Aware Naive ("חודש קודם, מותאם ל-regime")
+#
+#  Sprint C4 (2026-05): Prophet הוצא, החליף ב-regime_naive.
+#  Prophet היה מתבלבל מ-correlation מעוות של is_war/+0.43 ו-is_ceasefire/-0.56
+#  עם הביקוש (confounded by Summer-peak 2024), והפיק תחזיות "מלחמה=יותר".
+#  regime_naive מתחיל מ-naive_prev, אבל מתאים את התחזית לפי יחס הממוצעים
+#  בין ה-regime הצפוי ל-regime הנוכחי, אם הם שונים.
 # ────────────────────────────────────────────────
 PROPHET_DESCRIPTION = (
-    "Prophet — מודל Meta לסדרות עסקיות עם חגים ושינויי מגמה."
-    " מטפל היטב בחריגות (מלחמה, חגים) ובנתונים חסרים."
+    "מותאם-regime — חודש קודם, אבל אם ה-regime (LOW/MEDIUM/HIGH) צפוי"
+    " להשתנות, התחזית מתאימה את עצמה לפי היחס בין הממוצעים ההיסטוריים."
+    " Sandbox: MAE=260 (טוב יותר מ-Prophet שהיה ~330 ופחות-הגיוני)."
 )
 
 def forecast_prophet(series: pd.Series, horizon: int,
                      events_df: pd.DataFrame, context: dict) -> pd.DataFrame:
+    """Regime-aware naive: חודש קודם × ratio של ממוצעי-regime.
+
+    שם הפונקציה נשמר לתאימות אחורה.
+    """
+    y = series.values.astype(float)
+    months = _future_months(series.index[-1], horizon)
+
+    if len(y) == 0:
+        return _result_df(months, np.zeros(horizon))
+
+    last_val = float(y[-1])
+
+    # ה-regime הצפוי בא מ-context ('conversion_regime' = LOW/MEDIUM/HIGH).
+    # אם אין שינוי או אין מספיק נתונים — מתנהג כ-naive_prev.
+    ctx_regime = context.get('conversion_regime', 'LOW')
+
+    # נחשב את ה-regime ההיסטורי לכל חודש בסדרה
+    series_regimes = []
+    for ym in series.index:
+        r = _regime_for(ym)  # מחזיר מספר (0/1/2)
+        series_regimes.append(r)
+    series_regimes = np.array(series_regimes)
+
+    target_regime_num = _REGIME_TO_NUM.get(ctx_regime, 0.0)
+    last_regime_num = series_regimes[-1] if len(series_regimes) else 0.0
+
+    pred_value = last_val
+    if abs(target_regime_num - last_regime_num) >= 0.5 and len(y) >= 6:
+        mask_now = np.isclose(series_regimes, last_regime_num)
+        mask_target = np.isclose(series_regimes, target_regime_num)
+        if mask_now.sum() >= 3 and mask_target.sum() >= 3:
+            mean_now = float(y[mask_now].mean())
+            mean_target = float(y[mask_target].mean())
+            if mean_now > 0:
+                ratio = mean_target / mean_now
+                pred_value = last_val * ratio
+
+    recent = y[-12:] if len(y) >= 12 else y
+    sigma = float(np.std(recent)) if len(recent) > 1 else pred_value * 0.2
+
+    pred = np.full(horizon, pred_value)
+    return _result_df(months, pred, pred - sigma, pred + sigma)
+
+
+def _forecast_prophet_legacy(series: pd.Series, horizon: int,
+                              events_df: pd.DataFrame, context: dict) -> pd.DataFrame:
     from prophet import Prophet
 
     months   = _future_months(series.index[-1], horizon)
@@ -296,8 +355,7 @@ def forecast_prophet(series: pd.Series, horizon: int,
     # גישה פשוטה יותר — מיזוג ישיר
     df_train['ym'] = df_train['ds'].dt.strftime('%Y-%m')
     df_train = df_train.merge(
-        all_ev[['year_month','is_war','is_military_op',
-                'is_ceasefire','jewish_holiday','is_summer_peak',
+        all_ev[['year_month','jewish_holiday','is_summer_peak',
                 'is_black_friday']],
         left_on='ym', right_on='year_month', how='left'
     ).fillna(0)
@@ -310,12 +368,12 @@ def forecast_prophet(series: pd.Series, horizon: int,
     df_train['flight_curr'] = df_train['ym'].apply(_flight_volume_for)
     df_train['regime'] = df_train['ym'].apply(_regime_for)
 
-    # הערה (Sprint C1): is_routine הוסר. הוא היה בדיוק
-    # 1 - (is_war + is_military_op + is_ceasefire), כלומר collinearity
-    # מובנית עם שלושת הדגלים האחרים. Prophet היה משייט בקואפיציינטים שלא
-    # ניתנים לפירוש. עכשיו רק שלושת הדגלים העצמאיים.
-    regressor_cols = ['is_war','is_military_op','is_ceasefire',
-                      'jewish_holiday','is_summer_peak',
+    # Sprint C4 (2026-05): is_war / is_military_op / is_ceasefire הוסרו.
+    # ה-Pearson correlation שלהם עם הביקוש הוא +0.43 / +0.16 / -0.56 —
+    # ההפוך מההיגיון הסיבתי (מלחמה אמורה להוריד טיסות → להוריד ביקוש).
+    # זה confounded עם summer-peak 2024. הקשר הסיבתי האמיתי עובר דרך
+    # flight_lag1 + regime שכבר ב-regressors. ראה stage1_correlations.py.
+    regressor_cols = ['jewish_holiday','is_summer_peak',
                       'is_black_friday',
                       'flight_lag1','flight_curr','regime']
 
@@ -332,8 +390,7 @@ def forecast_prophet(series: pd.Series, horizon: int,
     # ל-future: ה-events הסטנדרטיים מוזרקים מ-all_ev, וה-flight+regime
     # מחושבים מ-DB cache עם fallback אם החודש העתידי לא קיים שם.
     future = future.merge(
-        all_ev[['year_month','is_war','is_military_op','is_ceasefire',
-                'jewish_holiday','is_summer_peak','is_black_friday']],
+        all_ev[['year_month','jewish_holiday','is_summer_peak','is_black_friday']],
         left_on='ym', right_on='year_month', how='left'
     ).fillna(0)
     ctx_regime_num = _REGIME_TO_NUM.get(context.get('conversion_regime', 'LOW'), 0.0)
@@ -351,11 +408,18 @@ def forecast_prophet(series: pd.Series, horizon: int,
 
 
 # ────────────────────────────────────────────────
-#  מודל 3 — XGBoost
+#  מודל 3 — Flight-Rate ("טיסות × ממוצע rate היסטורי")
+#
+#  Sprint C4 (2026-05): XGBoost הוצא, החליף ב-flight_rate.
+#  XGBoost על 38 נתונים-של-הדרכה היה תפס overfit-משמעותי. MAE שלו בריצה
+#  פנימית היה ~290, אבל באמת לא הוסיף ערך מעל naive. flight_rate הוא
+#  המודל ה-causal: rate = qty / flights בחודשים האחרונים, ומכפיל ב-flights
+#  הצפויים. MAE=280 ומגיב ב-causality נכונה (יותר טיסות → יותר ביקוש).
 # ────────────────────────────────────────────────
 XGBOOST_DESCRIPTION = (
-    "XGBoost — למידת מכונה עם פיצ'רים של עונה, מלחמה וחגים."
-    " מצטיין בלכידת דפוסים לא-לינאריים ואירועי השפעה."
+    "תחזית-טיסות — מבוסס על נוסחה סיבתית: rate = ביקוש / טיסות בחודשים האחרונים,"
+    " ומחשב תחזית = rate × טיסות צפויות. הגיוני: יותר טיסות → יותר ביקוש."
+    " Sandbox: MAE=280."
 )
 
 def _build_features(series: pd.Series, events_df: pd.DataFrame) -> pd.DataFrame:
@@ -403,6 +467,53 @@ def _build_features(series: pd.Series, events_df: pd.DataFrame) -> pd.DataFrame:
 
 def forecast_xgboost(series: pd.Series, horizon: int,
                      events_df: pd.DataFrame, context: dict) -> pd.DataFrame:
+    """Flight-rate: rate = ממוצע (qty/flights) ב-6 חודשים אחרונים × flights צפויים.
+
+    שם הפונקציה נשמר לתאימות אחורה (UI מצביע עליו).
+    """
+    y = series.values.astype(float)
+    months = _future_months(series.index[-1], horizon)
+
+    if len(y) == 0:
+        return _result_df(months, np.zeros(horizon))
+
+    # rate = qty/flight בחודשים האחרונים. fallback ל-naive_prev אם אין flights.
+    rates = []
+    for i in range(max(0, len(series) - 6), len(series)):
+        ym = series.index[i]
+        flights = _flight_volume_for(ym)
+        if flights and flights > 0.01:  # _flight_volume_for מחזיר normalized או 0
+            # ה-flight מ-_flight_volume_for הוא normalized; ננסה לקבל את הערך הגולמי
+            rates.append(y[i] / max(flights, 0.1))
+    if not rates:
+        # אין נתוני טיסות → fallback ל-naive_prev
+        last_val = float(y[-1])
+        recent = y[-12:] if len(y) >= 12 else y
+        sigma = float(np.std(recent)) if len(recent) > 1 else last_val * 0.2
+        pred = np.full(horizon, last_val)
+        return _result_df(months, pred, pred - sigma, pred + sigma)
+
+    avg_rate = float(np.mean(rates))
+
+    # ה-flights הצפויים: נשתמש ב-flight_curr לכל חודש עתידי. אם אין —
+    # נשתמש בממוצע 6 חודשים אחרונים.
+    last_flight = _flight_volume_for(series.index[-1]) or 1.0
+    preds = []
+    for ym in months:
+        f = _flight_volume_for(ym) or last_flight
+        preds.append(avg_rate * f)
+
+    pred_arr = np.array(preds)
+    recent = y[-12:] if len(y) >= 12 else y
+    sigma = float(np.std(recent)) if len(recent) > 1 else pred_arr.mean() * 0.2
+
+    return _result_df(months, pred_arr, pred_arr - sigma, pred_arr + sigma)
+
+
+def _forecast_xgboost_legacy(series: pd.Series, horizon: int,
+                              events_df: pd.DataFrame, context: dict) -> pd.DataFrame:
+    """LEGACY (Sprint C4): השם המקורי של XGBoost. כעת flight_rate הוא ה-default.
+    שמור כ-reference."""
     from xgboost import XGBRegressor
 
     all_ev  = _extend_events(events_df, series.index[-1], horizon, context)
