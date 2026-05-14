@@ -1354,8 +1354,8 @@ class ForecastTab(QWidget):
         explanation = QLabel(
             "התחזית מחשבת: כמות תיקונים = נחיתות מצופות × conversion-rate של ה-regime.\n"
             "ה-regime נלמד היסטורית — בחר ב-regime שאתה צופה שיהיה רלוונטי לחודשים הבאים.\n"
-            "8 סניפי-הליבה: ביאליק ת\"א, פולג, קרית אונו, הדר ירושלים, אמות באר שבע, "
-            "שרונים, אשקלון, שפיים."
+            "9 סניפי-הליבה: ביאליק ת\"א, פולג, קרית אונו, הדר ירושלים, אמות באר שבע, "
+            "שרונים, אשקלון, שפיים, חוצות המפרץ (800)."
         )
         explanation.setStyleSheet("font-size:11px;color:#7f8c8d;padding:4px;")
         explanation.setWordWrap(True)
@@ -1476,7 +1476,8 @@ class ForecastTab(QWidget):
             self.scen_status.setText("שגיאה בחישוב — עיין ב-log")
 
     # ── Tab 8: תחזית פר-תא ────────────────────────────────
-    BASELINE_BRANCHES_C2 = ['05', '07', '23', '310', '325', '331', '332', '346']
+    # 9 סניפי-ליבה (מתואם ל-causal_forecast.CORE_BRANCHES).
+    BASELINE_BRANCHES_C2 = ['05', '07', '23', '310', '325', '331', '332', '346', '800']
 
     def _build_tab_per_cell(self):
         """תחזית פר-(branch, cell) עם graceful degradation.
@@ -1492,7 +1493,7 @@ class ForecastTab(QWidget):
         v = QVBoxLayout(w)
         v.setSpacing(8)
 
-        title = QLabel("תחזית פר-(סניף × קטגוריה) — 8 סניפי-ליבה")
+        title = QLabel("תחזית פר-(סניף × קטגוריה) — 9 סניפי-ליבה")
         title.setStyleSheet("font-size:14px;font-weight:bold;color:#2c3e50;")
         title.setAlignment(Qt.AlignCenter)
         v.addWidget(title)
