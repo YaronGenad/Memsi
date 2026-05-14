@@ -100,6 +100,12 @@ def is_logfile_full_initialized() -> bool:
 # ============================================================
 #  Eligible branches
 # ============================================================
+def eligible_branches() -> list[str]:
+    """API ציבורי: רשימת סניפים זכאים. גם local_inventory_calculator
+    משתמש בזה כדי לסנן את ה-PARTBAL לסניפים-של-חנויות-בפרויקט."""
+    return _eligible_warehouses()
+
+
 def _eligible_warehouses() -> list[str]:
     """מחזיר רשימת מחסנים זכאים: יש להם תנועה-של-לקוח-מבוטח כפי שמוגדר.
 

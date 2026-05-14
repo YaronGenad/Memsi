@@ -228,10 +228,11 @@ def rebuild_local_inventory_from_partbal(lg: logging.Logger | None = None) -> di
     """ה-entry point החדש. מבוסס PARTBAL הטרי כמקור-אמת.
 
     הליך:
-    1. מושך PARTBAL טרי מ-Priority (כל המחסנים, כל המק"טים בעלי יתרה != 0).
-    2. כותב הכל ל-local_inventory.
-    3. לכל רשומה עם quantity <= -2 (חריג), מוסיף תרומת-סטים-מכילים מ-kit_bom
-       לפי החישוב הישן. זה מטפל בסניפים שעדיין מחזיקים סטים שלא פורקו.
+    1. מחשב את רשימת הסניפים-הזכאים דינמית (אלה שיש להם פעילות-לקוח-מבוטח
+       ב-12 חודשים אחרונים — אותה הגדרה כמו ב-min-stock tab).
+    2. מושך PARTBAL טרי מ-Priority, מסנן לסניפים-זכאים בלבד.
+    3. כותב הכל ל-local_inventory.
+    4. לכל רשומה עם quantity <= -2 (חריג), מוסיף תרומת-סטים-מכילים מ-kit_bom.
 
     הסיבה לסף -2 ולא -1: PARTBAL לפעמים מציג -1 בגלל timing-issues
     זמני; -2 ומטה זה drift אמיתי שכדאי לנסות לפרק-סטים-עליו.
@@ -239,19 +240,31 @@ def rebuild_local_inventory_from_partbal(lg: logging.Logger | None = None) -> di
     lg = lg or logger
     start = datetime.now()
 
+    # שלב 0: מי הסניפים הזכאים? (דינמי — אם סניף יוצא מפעילות, הוא יורד מהרשימה)
+    from min_stock_calculator import eligible_branches
+    eligible = set(eligible_branches())
+    lg.info("local_inv (partbal): %d eligible branches (dynamic)", len(eligible))
+    if not eligible:
+        lg.warning("local_inv (partbal): no eligible branches — aborting")
+        return {'rows': 0, 'duration_seconds': 0}
+
     # שלב 1: מושך PARTBAL טרי
     lg.info("local_inv (partbal): fetching fresh PARTBAL...")
     from inventory_manager import fetch_partbal_inventory
-    df = fetch_partbal_inventory()  # all warehouses, all suppliers
+    df = fetch_partbal_inventory()  # all warehouses; we filter below
     if df.empty:
         lg.warning("local_inv (partbal): PARTBAL returned 0 rows")
         return {'rows': 0, 'duration_seconds': 0}
-    lg.info("local_inv (partbal): %d rows from PARTBAL", len(df))
+    lg.info("local_inv (partbal): %d rows from PARTBAL (before filter)", len(df))
 
     # נורמליזציה: PARTBAL מחזיר בעמודות-עברית
     df = df[['מחסן', 'מקט', 'יתרה']].copy()
     df.columns = ['warehouse', 'sku', 'quantity']
     df['quantity'] = df['quantity'].astype(float)
+
+    # סינון לסניפים-זכאים בלבד
+    df = df[df['warehouse'].isin(eligible)].copy()
+    lg.info("local_inv (partbal): %d rows after filtering to eligible branches", len(df))
 
     # ב-PARTBAL יכולות להיות כפילויות באותו (warehouse, sku) — סוכמים.
     df = df.groupby(['warehouse', 'sku'], as_index=False)['quantity'].sum()
