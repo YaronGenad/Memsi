@@ -149,15 +149,54 @@ def sync_flight_schedule(lg: logging.Logger) -> dict:
     }
 
 
+def _logfile_full_initial_done() -> bool:
+    """בודק האם נמצא marker של initial-sync ב-sync_runs.records_pulled.
+    זה מבטיח שגם אם logfile_full מתמלא חלקית בגלל ריצה שנפלה באמצע,
+    לא נריץ initial_sync שוב בטעות."""
+    from db_config import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 1
+                FROM sync_runs
+                WHERE (records_pulled ->> 'logfile_full_initial_done')::boolean = true
+                LIMIT 1
+            """)
+            return cur.fetchone() is not None
+
+
 def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
-    """Sprint B2: מעדכן kit_bom (BOM של סטים) ואת local_inventory
-    (מלאי-אמיתי אחרי פירוק). ה-BOM משתנה לאט; מעדכנים אותו רק פעם בשבוע
-    כדי לא להעמיס."""
+    """Sprint B2: מעדכן logfile_full (תנועות-מלאי), מסווג IC docs, מעדכן
+    kit_bom (BOM של סטים) ואת local_inventory (מלאי-אמיתי אחרי פירוק).
+    ה-BOM משתנה לאט; מעדכנים אותו רק פעם בשבוע כדי לא להעמיס."""
     from datetime import date
     from kit_bom_builder import rebuild_bom
     from local_inventory_calculator import rebuild_local_inventory
+    from logfile_full_sync import incremental_sync, initial_sync, classify_ic_docs
 
-    out = {}
+    out: dict = {}
+
+    # logfile_full sync חייב לקדום ל-BOM/inventory rebuild כדי שה-rebuild
+    # יראה תנועות שנכנסו ל-Priority היום.
+    if _logfile_full_initial_done():
+        lg.info("logfile_full: incremental sync (last 30 days)")
+        r = incremental_sync(days=30, lg=lg)
+        out['logfile_full_rows'] = r.get('rows_attempted', 0)
+        out['logfile_full_skus']  = r.get('skus_processed', 0)
+    else:
+        lg.info("logfile_full: initial sync (full history) — first run")
+        r = initial_sync(lg=lg)
+        out['logfile_full_rows']   = r.get('rows_written', 0)
+        out['logfile_full_skus']   = r.get('skus_processed', 0)
+        out['logfile_full_errors'] = r.get('errors', 0)
+        # marker שמוזרק ל-records_pulled של ה-run הנוכחי דרך update_progress
+        # ב-run_full; ב-_logfile_full_initial_done() מחפשים אותו ב-sync_runs.
+        out['logfile_full_initial_done'] = True
+
+    lg.info("classify_ic_docs: starting")
+    r = classify_ic_docs(lg=lg)
+    out['ic_docs_classified'] = r.get('pairs', 0)
+
     # BOM rebuild — פעם בשבוע (יום ראשון)
     if date.today().weekday() == 6:  # Sunday in Python (Mon=0)
         lg.info("sync_kit_bom: weekly rebuild")

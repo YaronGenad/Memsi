@@ -75,6 +75,29 @@ def _category_sort_key(cat: str) -> tuple[int, int, int, str]:
 
 
 # ============================================================
+#  Logfile-full readiness check (used by the UI for empty-state messaging)
+# ============================================================
+_MIN_LOGFILE_FULL_ROWS = 1000
+
+
+def is_logfile_full_initialized() -> bool:
+    """Return True iff logfile_full has been populated enough that empty
+    computation results indicate a genuine lack of eligible branches rather
+    than an unfinished initial sync. The 1K threshold filters partially-loaded
+    DBs (e.g. a crashed initial-sync that wrote a handful of SKUs)."""
+    # COUNT(*) over a 200K-row table is fine on a local PG, but we only need
+    # to know if there are *at least* N rows — use a sampled count to bail early.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM (SELECT 1 FROM logfile_full LIMIT %s) s",
+                (_MIN_LOGFILE_FULL_ROWS,),
+            )
+            (n,) = cur.fetchone()
+    return n >= _MIN_LOGFILE_FULL_ROWS
+
+
+# ============================================================
 #  Eligible branches
 # ============================================================
 def _eligible_warehouses() -> list[str]:

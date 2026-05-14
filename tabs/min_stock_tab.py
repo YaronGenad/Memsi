@@ -167,7 +167,14 @@ class MinStockTab(QWidget):
     def _on_done(self, df: pd.DataFrame):
         self.compute_btn.setEnabled(True)
         if df is None or df.empty:
-            self.status_label.setText("אין נתונים — בדוק שיש תנועות-לקוח-מבוטח ב-12 חודשים האחרונים.")
+            from min_stock_calculator import is_logfile_full_initialized
+            if not is_logfile_full_initialized():
+                self.status_label.setText(
+                    "הנתונים עדיין מסתנכרנים. הסנכרון הראשוני נמשך 10–15 דקות. "
+                    "נסה שוב לאחר שהסנכרון הלילי הסתיים, או הפעל סנכרון ידני מטאב 'בקשת נתונים'."
+                )
+            else:
+                self.status_label.setText("אין נתונים — בדוק שיש תנועות-לקוח-מבוטח ב-12 חודשים האחרונים.")
             return
         self._df = df
         self._fill_table(df)
