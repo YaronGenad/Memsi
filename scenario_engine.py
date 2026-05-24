@@ -189,6 +189,43 @@ class ScenarioForecast:
     conversion_rate: float
 
 
+def _planned_flights_map() -> dict[str, int]:
+    """מחזיר {year_month: planned_flights} מ-flight_schedule. ריק אם אין.
+
+    Sprint C5.4: ה-scenario engine השתמש קודם רק ב-baseline-3-months + תרחיש-תיאורטי.
+    עכשיו מעדיף נתון-אמיתי-מנתב"ג כש-זמין (planned_flights מ-IAA scraper)."""
+    with get_conn() as conn:
+        df = pd.read_sql_query("""
+            SELECT year_month, SUM(planned_flights) AS planned
+            FROM flight_schedule
+            WHERE airline_code = 'TOTAL'
+            GROUP BY year_month
+        """, conn)
+    if df.empty:
+        return {}
+    return {r['year_month']: int(r['planned']) for _, r in df.iterrows()}
+
+
+def _flights_per_pax_ratio() -> float:
+    """ממוצע passengers/planned_flights בחודשים שיש להם שניהם.
+    משמש להמרה מ-planned_flights (מספר נוסעים) למספר נחיתות."""
+    with get_conn() as conn:
+        df = pd.read_sql_query("""
+            SELECT ft.year_month,
+                   ft.arriving_passengers,
+                   COALESCE(SUM(fs.planned_flights), 0) AS planned
+            FROM flight_traffic ft
+            LEFT JOIN flight_schedule fs ON fs.year_month = ft.year_month
+                                         AND fs.airline_code = 'TOTAL'
+            WHERE ft.arriving_passengers IS NOT NULL AND ft.notes = 'ok'
+            GROUP BY ft.year_month, ft.arriving_passengers
+            HAVING SUM(fs.planned_flights) > 0
+        """, conn)
+    if df.empty:
+        return 200.0  # fallback סביר: ~200 נוסעים פר טיסה
+    return float((df['arriving_passengers'] / df['planned']).mean())
+
+
 def forecast_scenario(
     last_year_month: str,
     horizon: int,
@@ -201,6 +238,10 @@ def forecast_scenario(
     horizon: כמה חודשים קדימה.
     flight_scenario: אחד מ-FLIGHT_SCENARIOS.
     conversion_regime: 'LOW' / 'MEDIUM' / 'HIGH'.
+
+    Sprint C5.4: עבור חודש עתידי שיש לו planned_flights ב-DB (מ-IAA scraper),
+    נשתמש בערך האמיתי ולא ב-baseline × multipliers. ה-multipliers משמשים רק
+    כשאין נתון-עתידי (ולשם המקרה של 'escalation' שמייצג ירידה דרסטית בכוונה).
     """
     if flight_scenario not in FLIGHT_SCENARIOS:
         raise ValueError(f"unknown flight_scenario: {flight_scenario}")
@@ -213,13 +254,30 @@ def forecast_scenario(
     scen_multipliers = FLIGHT_SCENARIOS[flight_scenario]['multipliers'](horizon)
     seasonal = _seasonal_multipliers()
 
+    # Sprint C5.4: נתוני flight_schedule (נתב"ג) עתידיים — מקור-האמת
+    planned_map = _planned_flights_map()
+    pax_per_flight = _flights_per_pax_ratio()
+
     cur = datetime.strptime(last_year_month + '-01', '%Y-%m-%d')
     out: list[ScenarioForecast] = []
     for i in range(horizon):
         cur = cur + relativedelta(months=1)
         ym = cur.strftime('%Y-%m')
-        season_mult = seasonal.get(cur.month, 1.0)
-        flights = baseline * scen_multipliers[i] * season_mult
+
+        # תרחיש 'escalation' תמיד משתמש ב-multiplier (כי הוא מבטא הנחה
+        # על אירוע-חדש). שאר התרחישים מעדיפים נתון-אמיתי-מנתב"ג.
+        if flight_scenario != 'escalation' and ym in planned_map:
+            # נתון אמיתי: ממירים מ-planned_flights ל-passengers
+            flights = planned_map[ym] * pax_per_flight
+            # למרות שיש נתון, תרחיש 'gradual_recovery'/'open_skies' עדיין
+            # יכול לעלות מעליו (שגרת-שיא). 'status_quo' מציג את הנתון כפי שהוא.
+            if flight_scenario in ('gradual_recovery', 'open_skies'):
+                flights = max(flights, baseline * scen_multipliers[i] * seasonal.get(cur.month, 1.0))
+        else:
+            # fallback: baseline × scenario × seasonal
+            season_mult = seasonal.get(cur.month, 1.0)
+            flights = baseline * scen_multipliers[i] * season_mult
+
         demand = (flights * rate) / 100000.0
         out.append(ScenarioForecast(
             year_month=ym,
