@@ -34,7 +34,7 @@ warnings.filterwarnings('ignore')
 #          ל-XGBoost ו-Prophet. flight_volume normalized ל-baseline, regime
 #          מקודד כ-numeric (LOW=0, MEDIUM=1, HIGH=2).
 # ────────────────────────────────────────────────
-MODEL_VERSION = "4"
+MODEL_VERSION = "5"
 
 
 # ────────────────────────────────────────────────
