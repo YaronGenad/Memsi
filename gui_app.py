@@ -190,7 +190,7 @@ class MainWindow(QMainWindow):
         self._start_sync(big=False, triggered_by='manual')
 
     def _start_sync(self, big: bool = False, triggered_by: str = 'app-startup'):
-        """מתחיל worker + דיאלוג."""
+        """פותח דיאלוג בחירת-שלבים. ה-worker נוצר רק כשהמשתמש לוחץ 'התחל'."""
         # מונע ריצה כפולה
         if getattr(self, '_sync_worker', None) is not None and self._sync_worker.isRunning():
             logger.info("sync already in progress, ignoring trigger")
@@ -199,21 +199,28 @@ class MainWindow(QMainWindow):
         from sync_worker import SyncWorker
         from sync_dialog import BigSyncDialog, SmallSyncDialog
 
-        self._sync_worker = SyncWorker(triggered_by=triggered_by)
         DialogCls = BigSyncDialog if big else SmallSyncDialog
-        self._sync_dialog = DialogCls(self, self._sync_worker)
+        dlg = DialogCls(self)
+        self._sync_dialog = dlg
 
-        # אחרי סיום — מרענן את ה-status-bar
-        self._sync_worker.finished_ok.connect(lambda _: self._refresh_sync_status())
-        self._sync_worker.finished_partial.connect(
-            lambda *_: self._refresh_sync_status())
-        # מנטרל את הכפתור בזמן הריצה
-        self._sync_now_btn.setEnabled(False)
-        self._sync_worker.finished.connect(
-            lambda: self._sync_now_btn.setEnabled(True))
+        def _on_start(selected: set):
+            self._sync_worker = SyncWorker(steps=selected, triggered_by=triggered_by)
+            dlg.attach_worker(self._sync_worker)
+            self._sync_worker.finished_ok.connect(lambda _: self._refresh_sync_status())
+            self._sync_worker.finished_partial.connect(
+                lambda *_: self._refresh_sync_status())
+            self._sync_now_btn.setEnabled(False)
+            self._sync_worker.finished.connect(
+                lambda: self._sync_now_btn.setEnabled(True))
+            self._sync_worker.start()
 
-        self._sync_worker.start()
-        self._sync_dialog.show()
+        def _on_cancel():
+            if getattr(self, '_sync_worker', None) is not None:
+                self._sync_worker.cancel()
+
+        dlg.start_requested.connect(_on_start)
+        dlg.cancel_requested.connect(_on_cancel)
+        dlg.show()
 
     def _refresh_sync_status(self):
         """קורא את הריצה האחרונה מ-sync_runs ומציג ב-status-bar."""

@@ -4,25 +4,45 @@ sync_worker.py — QThread worker שמריץ את nightly_sync ב-background.
 
 המנגנון: ה-GUI מציג דיאלוג עם progress. ה-worker רץ ב-thread נפרד וכותב
 progress דרך signals. ה-GUI מציג מה שהוא מקבל. בסיום, ה-worker emit-ים
-status sukko (records_pulled / errors).
+status (records_pulled / errors).
 
-הפרדה בין UI ל-pipeline: nightly_sync.run_full() נשאר זהה — הוא ה-truth.
-ה-worker רק עוטף אותו.
+Sprint C7.1 — בחירה פר-שלב.
+ה-worker מקבל set של מזהי-שלבים שצריך להריץ. ה-UI מאפשר למשתמש לבחור
+מה רוצים (לדוגמה, רק priority_rolling + partbal אם רוצים סנכרון מהיר).
 """
 from __future__ import annotations
 from qtpy.QtCore import QThread, Signal as pyqtSignal
 from logger import logger
 
 
+# רשימת השלבים הזמינים + תיאור + הערכת-זמן (לתצוגה ב-UI).
+# הסדר הזה הוא גם סדר ה-execution.
+SYNC_STEPS = [
+    ('priority_rolling', 'מסמכים ותנועות (30 ימים)', '~1-2 דק\''),
+    ('partbal',          'מלאי-בפועל מ-Priority',     '~3-5 דק\''),
+    ('logfile_full',     'תנועות-מלאי מלאות (לתחזיות)', '~5-12 דק\''),
+    ('local_inventory',  'מלאי-מקומי + סטים',         '~3-5 דק\''),
+    ('forecast_history', 'אגרגציית-תחזית חודשית',    '~5 שניות'),
+    ('iaa',              'נחיתות-נתב"ג היסטוריות',    '~10 שניות'),
+    ('flight_schedule',  'לוח-טיסות עתידי',           '~30 שניות'),
+]
+
+DEFAULT_STEPS = {'priority_rolling', 'partbal', 'forecast_history',
+                  'iaa', 'flight_schedule'}
+# logfile_full + local_inventory יקרים — לא דיפולט. המשתמש בוחר ידנית.
+
+ALL_STEPS = {s[0] for s in SYNC_STEPS}
+
+
 class SyncWorker(QThread):
-    """מריץ nightly_sync.run_full ב-background.
+    """מריץ שלבים נבחרים של nightly_sync ב-background.
 
     Signals:
-      step_started(str)  — תחילת שלב (priority_rolling / partbal / iaa)
-      step_done(str, dict) — סיום שלב עם הסיכום שלו
-      finished_ok(dict)  — סנכרון הסתיים בהצלחה, dict = records_pulled
-      finished_failed(str)  — נכשל לחלוטין
-      finished_partial(dict, str)  — חלקית: גם תוצאות וגם שגיאה
+      step_started(str)         — תחילת שלב
+      step_done(str, dict)      — סיום שלב עם הסיכום שלו
+      finished_ok(dict)         — סנכרון הסתיים בהצלחה, dict = records_pulled
+      finished_failed(str)      — נכשל לחלוטין
+      finished_partial(dict, str) — חלקית: גם תוצאות וגם שגיאה
     """
     step_started     = pyqtSignal(str)
     step_done        = pyqtSignal(str, dict)
@@ -30,40 +50,57 @@ class SyncWorker(QThread):
     finished_failed  = pyqtSignal(str)
     finished_partial = pyqtSignal(dict, str)
 
-    def __init__(self, days: int = 30, skip_iaa: bool = False,
+    def __init__(self, steps: set[str] | None = None, days: int = 30,
                  triggered_by: str = 'app-startup'):
         super().__init__()
+        # steps=None ⇒ ברירת-מחדל (השלבים המהירים).
+        # steps={} ⇒ אין מה לרוץ (יבוטל).
+        self.steps = ALL_STEPS & (steps if steps is not None else DEFAULT_STEPS)
         self.days = days
-        self.skip_iaa = skip_iaa
         self.triggered_by = triggered_by
         self._pulled: dict = {}
         self._errors: list[str] = []
+        self._cancel_requested = False
+
+    def cancel(self):
+        """בקשה לעצור אחרי השלב הנוכחי. השלב הנוכחי לא ייפסק באמצע."""
+        self._cancel_requested = True
+        logger.info("SyncWorker cancel requested")
 
     def run(self):
         try:
-            # ה-import lazy כדי לא לטעון את הקוד הזה כשה-app רק עולה.
-            # Sprint C7: נוספו sync_kit_bom_and_inventory ו-sync_flight_schedule
-            # שלפני כן רצו רק ב-nightly_sync.run_full ולא ב-GUI sync.
             from nightly_sync import (
                 sync_priority_rolling, sync_partbal, sync_iaa,
-                sync_kit_bom_and_inventory, sync_flight_schedule,
+                sync_logfile_full, sync_local_inventory, sync_forecast_history,
+                sync_flight_schedule,
             )
-            from sync_runs import start_run, update_progress, finish_run
+            from sync_runs import start_run, finish_run
+
+            if not self.steps:
+                self.finished_failed.emit("לא נבחרו שלבים לסנכרון")
+                return
 
             run_id = start_run(triggered_by=self.triggered_by)
-            logger.info("SyncWorker started run %d", run_id)
+            logger.info("SyncWorker started run %d, steps=%s", run_id, sorted(self.steps))
 
-            self._step(run_id, 'priority_rolling', sync_priority_rolling,
-                       days=self.days)
-            self._step(run_id, 'partbal', sync_partbal)
-            # sync_kit_bom_and_inventory כולל logfile_full incremental sync
-            # (~10 דק' ב-1404 SKUs) + classify_ic_docs + local_inventory rebuild
-            # + forecast_history aggregation. בלי השלב הזה ה-GUI sync לא מעדכן
-            # את התחזיות ואת המלאי המקומי.
-            self._step(run_id, 'kit_bom_inv', sync_kit_bom_and_inventory)
-            if not self.skip_iaa:
-                self._step(run_id, 'iaa', sync_iaa)
-                self._step(run_id, 'flight_schedule', sync_flight_schedule)
+            # מיפוי שלב -> פונקציה. הסדר חשוב — חלק תלויים בקודמים.
+            step_fns = [
+                ('priority_rolling', sync_priority_rolling, {'days': self.days}),
+                ('partbal',          sync_partbal,          {}),
+                ('logfile_full',     sync_logfile_full,     {}),
+                ('local_inventory',  sync_local_inventory,  {}),
+                ('forecast_history', sync_forecast_history, {}),
+                ('iaa',              sync_iaa,              {}),
+                ('flight_schedule',  sync_flight_schedule,  {}),
+            ]
+
+            for name, fn, kwargs in step_fns:
+                if self._cancel_requested:
+                    logger.info("SyncWorker cancel honored before step %s", name)
+                    break
+                if name not in self.steps:
+                    continue
+                self._step(run_id, name, fn, **kwargs)
 
             if not self._errors:
                 status = 'ok'
@@ -80,7 +117,10 @@ class SyncWorker(QThread):
                 last_error_text='\n'.join(self._errors) if self._errors else None,
             )
 
-            if status == 'ok':
+            if self._cancel_requested:
+                # נראה לקורא כ-partial: יש תוצאות חלקיות + הודעת ביטול.
+                self.finished_partial.emit(self._pulled, "בוטל ע\"י המשתמש")
+            elif status == 'ok':
                 self.finished_ok.emit(self._pulled)
             elif status == 'partial':
                 self.finished_partial.emit(self._pulled, '\n'.join(self._errors))
@@ -96,7 +136,6 @@ class SyncWorker(QThread):
         from sync_runs import update_progress
         self.step_started.emit(name)
         try:
-            # ה-pipeline functions מקבלים logger; נספק אחד דמה כדי שלא יקרסו
             result = fn(lg=logger, **kwargs)
             self._pulled.update(result)
             update_progress(run_id, self._pulled)
