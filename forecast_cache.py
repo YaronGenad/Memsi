@@ -120,8 +120,8 @@ def clear_all():
         try:
             f.unlink()
             n += 1
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("forecast_cache: could not unlink %s: %s", f, e)
     logger.info("forecast_cache: cleared %d files", n)
     return n
 
