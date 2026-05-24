@@ -195,7 +195,6 @@ def upsert_customer_repair_price(tier: str, part_sku: str, price: float,
                'UPDATE' if old else 'INSERT',
                {'pricing_tier': tier, 'part_sku': part_sku},
                old_val, {'price': float(price)}, user)
-        conn.commit()
     invalidate('repair_prices', 'repair_skus')
     logger.info("upsert repair_price: tier=%s sku=%s price=%s by=%s",
                 tier, part_sku, price, user)
@@ -225,7 +224,6 @@ def upsert_customer_replacement_price(tier: str, luggage_type: str,
                'UPDATE' if old else 'INSERT',
                {'pricing_tier': tier, 'luggage_type': luggage_type},
                old_val, {'price': float(price)}, user)
-        conn.commit()
     invalidate('replacement_prices')
     logger.info("upsert replacement_price: tier=%s type=%s price=%s by=%s",
                 tier, luggage_type, price, user)
@@ -286,7 +284,6 @@ def upsert_supplier_repair_price(part_sku: str, price: float,
         _audit(cur, 'supplier_repair_prices',
                'UPDATE' if old else 'INSERT',
                {'part_sku': part_sku}, old_val, {'price': float(price)}, user)
-        conn.commit()
     invalidate('supplier_repair', 'repair_skus')
 
 
@@ -311,7 +308,6 @@ def upsert_supplier_replacement_price(luggage_type: str, price: float,
                'UPDATE' if old else 'INSERT',
                {'luggage_type': luggage_type}, old_val,
                {'price': float(price)}, user)
-        conn.commit()
     invalidate('supplier_replacement')
 
 
@@ -499,7 +495,6 @@ def add_luggage_identification(description: str, category: str,
                'UPDATE' if old else 'INSERT',
                {'description': description}, old_val,
                {'category': category}, user)
-        conn.commit()
     invalidate('luggage_id', 'luggage_categories',
                'luggage_by_category', 'luggage_patterns')
     logger.info("add luggage_id: '%s' as %s by=%s", description, category, user)

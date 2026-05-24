@@ -137,28 +137,26 @@ def compute_slice_share(selected_branches: list[str] | None,
                  - relativedelta(months=lookback_months))
     cutoff = cutoff_dt.strftime('%Y-%m')
 
+    # Sprint C7: עברנו ל-ANY(%s) במקום f-string IN (...) — defensive engineering
+    # למניעת SQL injection אם בעתיד הערכים יבואו מ-UI.
     with get_conn() as conn:
         if selected_categories:
-            slice_q = pd.read_sql_query(f"""
-                SELECT SUM(quantity)::int AS q
-                FROM forecast_history
-                WHERE branch IN ({','.join(repr(b) for b in branches_in_core)})
-                  AND luggage_type IN ({','.join(repr(c) for c in selected_categories)})
-                  AND year_month >= '{cutoff}'
-            """, conn)
+            slice_q = pd.read_sql_query(
+                "SELECT SUM(quantity)::int AS q FROM forecast_history "
+                "WHERE branch = ANY(%s) AND luggage_type = ANY(%s) AND year_month >= %s",
+                conn, params=(list(branches_in_core), list(selected_categories), cutoff),
+            )
         else:
-            slice_q = pd.read_sql_query(f"""
-                SELECT SUM(quantity)::int AS q
-                FROM forecast_history
-                WHERE branch IN ({','.join(repr(b) for b in branches_in_core)})
-                  AND year_month >= '{cutoff}'
-            """, conn)
-        core_full_q = pd.read_sql_query(f"""
-            SELECT SUM(quantity)::int AS q
-            FROM forecast_history
-            WHERE branch IN ({','.join(repr(b) for b in CORE_BRANCHES)})
-              AND year_month >= '{cutoff}'
-        """, conn)
+            slice_q = pd.read_sql_query(
+                "SELECT SUM(quantity)::int AS q FROM forecast_history "
+                "WHERE branch = ANY(%s) AND year_month >= %s",
+                conn, params=(list(branches_in_core), cutoff),
+            )
+        core_full_q = pd.read_sql_query(
+            "SELECT SUM(quantity)::int AS q FROM forecast_history "
+            "WHERE branch = ANY(%s) AND year_month >= %s",
+            conn, params=(list(CORE_BRANCHES), cutoff),
+        )
 
     slice_total = int(slice_q.iloc[0]['q'] or 0)
     core_total  = int(core_full_q.iloc[0]['q'] or 0)
@@ -241,12 +239,11 @@ def calibrate_rates_from_history(verbose: bool = False) -> dict[str, dict]:
     """מחשב rates מהיסטוריה. רץ ידנית כשרוצים לרענן את ה-rates.
     לא נקרא אוטומטית — ה-rates ב-DB עדיפים."""
     with get_conn() as conn:
-        rep = pd.read_sql_query(f"""
-            SELECT year_month, SUM(quantity)::int AS repairs
-            FROM forecast_history
-            WHERE branch IN ({','.join(repr(b) for b in CORE_BRANCHES)})
-            GROUP BY year_month
-        """, conn)
+        rep = pd.read_sql_query(
+            "SELECT year_month, SUM(quantity)::int AS repairs "
+            "FROM forecast_history WHERE branch = ANY(%s) GROUP BY year_month",
+            conn, params=(list(CORE_BRANCHES),),
+        )
         fl = pd.read_sql_query(
             "SELECT year_month, arriving_passengers FROM flight_traffic WHERE notes='ok'",
             conn

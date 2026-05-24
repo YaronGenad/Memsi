@@ -203,6 +203,16 @@ unreachable, but in normal operation the DB is the source of truth.
   against a local copy of production data. That's the tradeoff for internal
   tooling.
 
+## Known limitations
+
+* **`forecast_tab.py` size** - the file is 1,788 lines with `ForecastTab`
+  alone spanning 1,307. A future refactor should split it into
+  `forecast_tab.py` (coordinator), `forecast_tab_builders.py` (UI
+  construction), and `forecast_charts.py` (chart classes). Deferred from
+  Sprint C7 (v0.16.1) to avoid risking a wide change just before
+  deployment. Tracked as tech debt; touching this file should be done
+  carefully until the split happens.
+
 ## Nightly sync
 
 `nightly_sync.py` is the unattended job that keeps the local copy fresh.

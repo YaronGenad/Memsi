@@ -28,6 +28,7 @@ forecast_models_cache/
 # חוץ מנתוני-מקור שכן רוצים ב-git
 !iaa_flight_data.csv
 !forecast_events.csv
+!data/historical_features.csv
 
 # IAA PDFs cache (470MB; ניתן להוריד מחדש דרך הסקריפט)
 .iaa_pdfs/

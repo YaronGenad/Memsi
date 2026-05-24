@@ -578,9 +578,14 @@ def run_all_models(series: pd.Series, horizon: int,
                        ('anxiety', 'economy_open', 'flight_capacity'))
     if has_new_ctx:
         try:
-            from forecast_weekly_cell import forecast_total_by_cell
+            # Sprint C7: עוטף ב-cache. אם הקלטים זהים לריצה קודמת — מחזיר מ-cache
+            # תוך פחות משניה במקום ~10s של pull + train.
+            try:
+                from forecast_cache import cached_weekly_cell as _weekly_cell_fn
+            except Exception:
+                from forecast_weekly_cell import forecast_total_by_cell as _weekly_cell_fn
             _note("  מריץ פר-cell (weekly)...")
-            results['weekly_cell'] = forecast_total_by_cell(
+            results['weekly_cell'] = _weekly_cell_fn(
                 series, horizon, events_df, context
             )
         except Exception as e:
