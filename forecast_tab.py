@@ -106,8 +106,17 @@ class ForecastWorker(QThread):
 
     def run(self):
         try:
+            # Sprint C5.2: ה-weekly_cell צריך לדעת מי הסניפים והקטגוריות
+            # שנבחרו ב-UI כדי לסנן (אחרת תחזיר סך-כל-הרשת).
+            # מעבירים דרך ה-context בלי לשבור את ה-API הקיים.
+            ctx = dict(self.context)
+            if self.branches:
+                ctx['_selected_branches'] = list(self.branches)
+            if self.categories:
+                ctx['_selected_categories'] = list(self.categories)
+
             res = run_all_models(
-                self.series, self.horizon, self.events_df, self.context,
+                self.series, self.horizon, self.events_df, ctx,
                 progress_callback=self.progress.emit,
             )
 
@@ -940,8 +949,11 @@ class ForecastTab(QWidget):
         self.snap_status.setText("מריץ מודלים…")
         self.snap_fc_chart._draw_placeholder()
 
+        # Sprint C5.2: לעבור גם לסניף-הנבחר ל-weekly_cell
+        snap_ctx = dict(self._build_context())
+        snap_ctx['_selected_branches'] = [code]
         self._snap_worker = BranchSnapshotWorker(
-            series, hist, self.fdb.get_events(), self._build_context())
+            series, hist, self.fdb.get_events(), snap_ctx)
         self._snap_worker.progress.connect(self.snap_status.setText)
         self._snap_worker.finished.connect(lambda r: self._on_snapshot_done(r, series, label))
         self._snap_worker.error.connect(self._on_snap_error)
