@@ -46,7 +46,10 @@ _regime_cache: dict[str, str] = {}
 _features_cache_loaded: bool = False
 
 
-_REGIME_TO_NUM = {'LOW': 0.0, 'MEDIUM': 1.0, 'HIGH': 2.0}
+# Sprint C5.3: ROUTINE (pre-war שגרה רגילה) ו-LOW (post-trauma) שניהם
+# conversion-rate נמוך, אבל ROUTINE יש לו flight_capacity יותר גבוה.
+# ערכי הקידוד מספקים סדר טבעי: ROUTINE (-0.5) ← LOW (0) ← MEDIUM (1) ← HIGH (2).
+_REGIME_TO_NUM = {'ROUTINE': -0.5, 'LOW': 0.0, 'MEDIUM': 1.0, 'HIGH': 2.0}
 
 
 def _load_features_cache() -> None:
@@ -106,11 +109,42 @@ def _flight_baseline() -> float:
 
 def _flight_volume_for(ym: str, fallback: float | None = None) -> float:
     """מחזיר arriving_passengers ל-year_month, מנורמלל ל-baseline.
-    אם חסר — fallback ל-1.0 (כלומר baseline)."""
+
+    הזרת-נתונים (Sprint C5.3):
+    1. אם יש arriving_passengers ב-flight_traffic — משתמש בו (היסטוריה).
+    2. אחרת אם יש planned_flights ב-flight_schedule — מעריך passengers
+       על-בסיס יחס היסטורי של passengers/planned-flights.
+    3. אחרת — לוקח ממוצע של אותו חודש-בלוח-השנה בשנים קודמות (seasonality).
+    4. אחרון — fallback ל-1.0 (baseline).
+    """
     _load_features_cache()
+    baseline = _flight_baseline()
+    if baseline <= 0:
+        baseline = 700_000.0
+
+    # שלב 1: היסטוריה אמיתית
     if ym in _flight_cache:
-        baseline = _flight_baseline()
-        return _flight_cache[ym] / baseline if baseline > 0 else 1.0
+        return _flight_cache[ym] / baseline
+
+    # שלב 2: planned_flights
+    if ym in _schedule_cache and _schedule_cache[ym] > 0:
+        # יחס היסטורי: passengers/planned. נחשב על חודשים שיש להם את שניהם.
+        ratios = []
+        for k, v in _flight_cache.items():
+            if k in _schedule_cache and _schedule_cache[k] > 0:
+                ratios.append(v / _schedule_cache[k])
+        if ratios:
+            avg_ratio = sum(ratios) / len(ratios)
+            estimated = _schedule_cache[ym] * avg_ratio
+            return estimated / baseline
+
+    # שלב 3: ממוצע חודש-בלוח-שנה בשנים קודמות
+    month = ym[5:7]
+    same_month_values = [v for k, v in _flight_cache.items() if k[5:7] == month]
+    if same_month_values:
+        avg = sum(same_month_values) / len(same_month_values)
+        return avg / baseline
+
     if fallback is not None:
         return fallback
     return 1.0
