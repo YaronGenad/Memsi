@@ -401,11 +401,20 @@ def forecast_total_by_cell(
     """ממשק תואם-API לקריאה מ-forecast_engine.run_all_models.
 
     משתמש בארכיטקטורה החדשה: מאמן פר-cell, מחזה לכל החודשים, ומחזיר
-    סכום-כללי על כל הסניפים והקטגוריות.
+    סכום-כללי על הסניפים והקטגוריות שנבחרו (או על הכל אם לא נבחרו).
 
-    Returns: DataFrame עם year_month, forecast, lower, upper
+    Sprint C5.2: ה-context יכול לכלול:
+        _selected_branches:    רשימת קודי-סניפים (למשל ['05'])
+        _selected_categories:  רשימת קטגוריות (למשל ['גדולה קלאסית קשיחה'])
+    אם המפתחות חסרים → מחזירים סך-כללי על כל הסניפים/קטגוריות.
     """
-    res = forecast_per_cell(horizon_months=horizon, context=context)
+    branches = (context or {}).get('_selected_branches')
+    categories = (context or {}).get('_selected_categories')
+    # ה-branchname ב-documents הוא תמיד קוד-סניף (05, 800, וכו'),
+    # תואם למה שה-UI שולח. אין צורך בתרגום.
+
+    res = forecast_per_cell(horizon_months=horizon, context=context,
+                             branches=branches, categories=categories)
     if res.empty:
         # fallback ריק
         months = pd.date_range(
