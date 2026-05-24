@@ -15,6 +15,7 @@ from tabs.inventory_analysis_tab import InventoryAnalysisTab
 from tabs.unidentified_products_tab import UnidentifiedProductsTab
 from tabs.updates_tab import UpdatesTab
 from tabs.min_stock_tab import MinStockTab
+from tabs.per_cell_planning_tab import PerCellPlanningTab
 from forecast_tab import ForecastTab
 
 
@@ -67,6 +68,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(UnidentifiedProductsTab(),   "זיהוי מוצרים")
         tabs.addTab(ForecastTab(),               "תחזיות")
         tabs.addTab(MinStockTab(),               "מלאי מינימום")
+        tabs.addTab(PerCellPlanningTab(),        "תכנון רכש פר-קטגוריה")
         tabs.addTab(UpdatesTab(),                "עדכונים")
 
         # ── שורת סטטוס תחתית ──

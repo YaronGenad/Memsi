@@ -34,6 +34,59 @@ def _r(text: str) -> str:
     return _bidi(str(text)) if text else text
 
 
+def _translate_context_to_features(ctx: dict) -> dict:
+    """Sprint C5.1: מתרגם את הצ'קבוקסים הבינאריים של ה-UI לפיצ'רים מספריים
+    שמודל ה-weekly_cell משתמש בהם (anxiety, economy_open, flight_capacity,
+    consumer_spending, arriving_passengers).
+
+    הסקלה: 0=קיצוני שלילי, 10=קיצוני חיובי.
+    הערכים מבוססים על הנתונים ההיסטוריים ב-historical_features.csv:
+        Routine:        anxiety=3, economy=10, flight=10, spend=8
+        Active war:     anxiety=8, economy=5,  flight=4,  spend=4
+        Limited op:     anxiety=6, economy=7,  flight=7,  spend=6
+        Ceasefire:      anxiety=3, economy=9,  flight=9,  spend=10
+        Peak attack:    anxiety=10, economy=2, flight=2,  spend=2
+    """
+    is_war = ctx.get('is_war', 0)
+    is_op = ctx.get('is_military_op', 0)
+    is_cease = ctx.get('is_ceasefire', 0)
+    is_holiday = ctx.get('jewish_holiday', 0)
+    is_summer = ctx.get('is_summer_peak', 0)
+
+    # Peak attack: מלחמה + מבצע ביחד (ה-UI אומר "מלחמה משולבת עם מבצע")
+    if is_war and is_op:
+        anxiety, economy, flight, spend, passengers = 10, 2, 2, 2, 200_000
+    # War alone
+    elif is_war:
+        anxiety, economy, flight, spend, passengers = 8, 5, 4, 4, 400_000
+    # Military operation alone
+    elif is_op:
+        anxiety, economy, flight, spend, passengers = 6, 7, 7, 6, 500_000
+    # Ceasefire (recovery)
+    elif is_cease:
+        anxiety, economy, flight, spend, passengers = 3, 9, 9, 10, 800_000
+    # Routine
+    else:
+        anxiety, economy, flight, spend, passengers = 3, 10, 10, 8, 700_000
+
+    # חגים מעלים consumer spending ב-1-2
+    if is_holiday:
+        spend = min(10, spend + 2)
+    # שיא קיץ מעלה גם flight + spending
+    if is_summer:
+        flight = min(10, flight + 1)
+        spend = min(10, spend + 1)
+        passengers = int(passengers * 1.2)
+
+    return {
+        'anxiety': anxiety,
+        'economy_open': economy,
+        'flight_capacity': flight,
+        'consumer_spending': spend,
+        'arriving_passengers': passengers,
+    }
+
+
 # ════════════════════════════════════════════════
 #  Workers
 # ════════════════════════════════════════════════
@@ -838,6 +891,11 @@ class ForecastTab(QWidget):
         # Sprint C2.5: regime נכלל ב-context; משפיע על XGBoost ו-Prophet
         if hasattr(self, 'regime_combo'):
             ctx['conversion_regime'] = self.regime_combo.currentData()
+
+        # Sprint C5.1: תרגום הצ'קבוקסים הקיימים לפיצ'רים החדשים. זה מפעיל
+        # את המודל החדש (weekly_cell) שעובד פר-(branch, category, week).
+        # הסקלה: 0=קיצוני שלילי, 10=קיצוני חיובי.
+        ctx.update(_translate_context_to_features(ctx))
         return ctx
 
     def _make_title(self, labels, cats, horizon) -> str:
