@@ -141,12 +141,13 @@ def _build_features(dense: pd.DataFrame) -> pd.DataFrame:
         dense[f'roll{win}_mean'] = g.transform(
             lambda s: s.shift(1).rolling(win, min_periods=1).mean())
 
-    # Context features
+    # Context features. ברירת-מחדל: קובץ ה-CSV ההיסטורי שב-repo (data/).
+    # אם המשתמש רוצה לעקוף את זה (למשל לבדיקות), אפשר להגדיר HISTORICAL_FEATURES_PATH ב-.env.
+    import os
+    default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 'data', 'historical_features.csv')
+    ctx_path = os.environ.get('HISTORICAL_FEATURES_PATH', default_path)
     try:
-        # מעדיף לקבל את ה-historical context מ-CSV (אם קיים), אחרת fall back
-        # ל-defaults של monitor (אחרי שתשלים תיוג).
-        import os
-        ctx_path = r'c:\tmp\historical_features.csv'
         if os.path.exists(ctx_path):
             ctx = pd.read_csv(ctx_path)
             dense = dense.merge(
@@ -156,10 +157,11 @@ def _build_features(dense: pd.DataFrame) -> pd.DataFrame:
             for c in ['anxiety', 'economy_open', 'flight_capacity', 'consumer_spending']:
                 dense[c] = pd.to_numeric(dense[c], errors='coerce').ffill().fillna(5)
         else:
+            logger.warning("historical_features.csv not found at %s; using neutral context (5).", ctx_path)
             for c in ['anxiety', 'economy_open', 'flight_capacity', 'consumer_spending']:
                 dense[c] = 5
     except Exception as e:
-        logger.warning("Could not load context CSV: %s", e)
+        logger.warning("Could not load context CSV at %s: %s", ctx_path, e)
         for c in ['anxiety', 'economy_open', 'flight_capacity', 'consumer_spending']:
             dense[c] = 5
 

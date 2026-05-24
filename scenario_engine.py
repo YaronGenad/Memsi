@@ -83,19 +83,20 @@ def compute_conversion_rates(force_refresh: bool = False) -> dict[str, float]:
             and (now - _conversion_cache_at).total_seconds() < 3600):
         return dict(_conversion_cache)
 
-    sql = f"""
+    # Sprint C7: parameterized query
+    sql = """
         SELECT fe.conversion_regime,
                SUM(fh.quantity)::float / ft.arriving_passengers * 100000.0 AS rate
         FROM forecast_events fe
         JOIN flight_traffic ft USING (year_month)
         JOIN forecast_history fh USING (year_month)
-        WHERE fh.branch IN ({','.join(repr(b) for b in BASELINE_BRANCH_CODES)})
+        WHERE fh.branch = ANY(%s)
           AND fe.conversion_regime IS NOT NULL
           AND ft.arriving_passengers > 0
         GROUP BY fe.conversion_regime, fe.year_month, ft.arriving_passengers
     """
     with get_conn() as conn:
-        df = pd.read_sql_query(sql, conn)
+        df = pd.read_sql_query(sql, conn, params=(list(BASELINE_BRANCH_CODES),))
 
     rates: dict[str, float] = dict(DEFAULT_CONVERSION_RATES)
     if not df.empty:

@@ -168,8 +168,7 @@ def save_run(branches: list[str], categories: list[str],
                     ON CONFLICT (run_id, model) DO NOTHING
                 """, metric_rows)
 
-        conn.commit()
-
+    # get_conn() commits on clean exit; no manual commit needed.
     logger.info("forecast run saved: id=%d horizon=%d branches=%s",
                 run_id, horizon_months, branches)
     return run_id

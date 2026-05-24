@@ -157,3 +157,16 @@ def cached_xgboost(series, horizon, events_df, context):
     df = forecast_xgboost(series, horizon, events_df, context)
     put('xgboost', series, horizon, events_df, context, df)
     return df
+
+
+def cached_weekly_cell(series, horizon, events_df, context):
+    """Sprint C7: כריכת המודל weekly_cell ב-forecast_cache.
+    forecast_total_by_cell עושה pull → aggregate → train (~2-5 שניות),
+    שיכול להיות painful אם המשתמש מריץ את התחזית פעמיים על אותו context."""
+    df = get('weekly_cell', series, horizon, events_df, context)
+    if df is not None:
+        return df
+    from forecast_weekly_cell import forecast_total_by_cell
+    df = forecast_total_by_cell(series, horizon, events_df, context)
+    put('weekly_cell', series, horizon, events_df, context, df)
+    return df

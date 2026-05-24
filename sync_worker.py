@@ -41,9 +41,12 @@ class SyncWorker(QThread):
 
     def run(self):
         try:
-            # ה-import lazy כדי לא לטעון את הקוד הזה כשה-app רק עולה
+            # ה-import lazy כדי לא לטעון את הקוד הזה כשה-app רק עולה.
+            # Sprint C7: נוספו sync_kit_bom_and_inventory ו-sync_flight_schedule
+            # שלפני כן רצו רק ב-nightly_sync.run_full ולא ב-GUI sync.
             from nightly_sync import (
-                sync_priority_rolling, sync_partbal, sync_iaa
+                sync_priority_rolling, sync_partbal, sync_iaa,
+                sync_kit_bom_and_inventory, sync_flight_schedule,
             )
             from sync_runs import start_run, update_progress, finish_run
 
@@ -53,8 +56,14 @@ class SyncWorker(QThread):
             self._step(run_id, 'priority_rolling', sync_priority_rolling,
                        days=self.days)
             self._step(run_id, 'partbal', sync_partbal)
+            # sync_kit_bom_and_inventory כולל logfile_full incremental sync
+            # (~10 דק' ב-1404 SKUs) + classify_ic_docs + local_inventory rebuild
+            # + forecast_history aggregation. בלי השלב הזה ה-GUI sync לא מעדכן
+            # את התחזיות ואת המלאי המקומי.
+            self._step(run_id, 'kit_bom_inv', sync_kit_bom_and_inventory)
             if not self.skip_iaa:
                 self._step(run_id, 'iaa', sync_iaa)
+                self._step(run_id, 'flight_schedule', sync_flight_schedule)
 
             if not self._errors:
                 status = 'ok'
