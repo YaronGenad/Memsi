@@ -168,8 +168,18 @@ def _build_features(dense: pd.DataFrame) -> pd.DataFrame:
         flights = pd.read_sql_query(
             "SELECT year_month, arriving_passengers FROM flight_traffic", conn)
     dense = dense.merge(flights, on='year_month', how='left')
+
+    # Sprint C5.3: שיפור fallback ל-arriving_passengers — במקום ממוצע
+    # גלובלי, נשתמש בממוצע פר-חודש-של-השנה (seasonality). כך חודש-קיץ
+    # עתידי יקבל את עוצמת-הקיץ-ההיסטורית במקום baseline שטוח.
+    dense['_month'] = dense['year_month'].str[5:7]
+    seasonal_avg = (flights.assign(_month=lambda d: d['year_month'].str[5:7])
+                    .groupby('_month')['arriving_passengers'].mean())
+    global_avg = float(flights['arriving_passengers'].mean())
+    dense['_seasonal'] = dense['_month'].map(seasonal_avg).fillna(global_avg)
     dense['arriving_passengers'] = dense['arriving_passengers'].fillna(
-        dense['arriving_passengers'].mean())
+        dense['_seasonal'])
+    dense = dense.drop(columns=['_month', '_seasonal'])
 
     return dense
 

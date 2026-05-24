@@ -72,11 +72,13 @@ def _translate_context_to_features(ctx: dict) -> dict:
     # חגים מעלים consumer spending ב-1-2
     if is_holiday:
         spend = min(10, spend + 2)
-    # שיא קיץ מעלה גם flight + spending
+    # שיא קיץ: דחיפה משמעותית יותר. ב-2024 (שיא) הקיץ הניב פי-2 ממוצע;
+    # ב-2025/2026 פי-1.4. אז נכפיל את passengers ב-1.5 (אמצע) ונוסיף +2
+    # ל-consumer spending.
     if is_summer:
         flight = min(10, flight + 1)
-        spend = min(10, spend + 1)
-        passengers = int(passengers * 1.2)
+        spend = min(10, spend + 2)
+        passengers = int(passengers * 1.5)
 
     return {
         'anxiety': anxiety,
@@ -551,7 +553,12 @@ class ForecastTab(QWidget):
         regime_lbl.setStyleSheet("font-size:10px;color:#555;padding-top:4px;")
         gc.addWidget(regime_lbl)
         self.regime_combo = QComboBox()
-        self.regime_combo.addItem("LOW — שגרה / post-trauma (~50/100K)", "LOW")
+        # Sprint C5.3: פיצול ה-LOW לשניים — שגרה רגילה (pre-war) ו-post-trauma.
+        # שניהם conversion-rate ~50/100K אבל הקונטקסט שונה. ROUTINE = pre-war
+        # נורמלי (יותר טיסות, יותר תיירות). POST_TRAUMA = אחרי-מלחמה (פחות
+        # תיירות חרף שלום, אנשים מהססים).
+        self.regime_combo.addItem("ROUTINE — שגרה רגילה (pre-war, ~50/100K)", "ROUTINE")
+        self.regime_combo.addItem("LOW — post-trauma (~50/100K)", "LOW")
         self.regime_combo.addItem("MEDIUM — ceasefire רגיל (~80/100K)", "MEDIUM")
         self.regime_combo.addItem("HIGH — שגרת-מלחמה עם backlog (~150/100K)", "HIGH")
         self.regime_combo.setCurrentIndex(0)
