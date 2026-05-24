@@ -181,13 +181,18 @@ class ProcurementWorker(QThread):
                     continue
                 ar6  = forecast_arima(s, 6, self.events_df, self.context)
                 xg6  = forecast_xgboost(s, 6, self.events_df, self.context)
-                nv   = newsvendor_order(
+                # Sprint C5.4: שומר std-per-month (לא 6m std) כי ה-newsvendor
+                # מחושב מחדש ב-_refresh_procurement_table לפי horizon הנבחר.
+                std_pm = float(s.std()) if len(s) > 1 else 0.0
+                # Backward-compat: עדיין שולחים newsvendor "ברירת-מחדל" ל-6m.
+                nv = newsvendor_order(
                     mean_demand=float((ar6['forecast'].sum() + xg6['forecast'].sum()) / 2),
-                    std_demand=float(s.std() * np.sqrt(6)),
+                    std_demand=std_pm * np.sqrt(6),
                 )
                 out[cat] = {
                     'arima': ar6, 'xgboost': xg6,
                     'newsvendor': nv,
+                    'std_per_month': std_pm,
                     'hist_avg3': round(float(s.tail(3).mean()), 1),
                 }
             self.finished.emit(out)
@@ -936,9 +941,22 @@ class ForecastTab(QWidget):
         if not label:
             return
         code = self._branch_code_map.get(label, label)
-        hist = self.fdb.get_history(branches=[code])
-        if hist.empty:
+        hist_full = self.fdb.get_history(branches=[code])
+        if hist_full.empty:
             QMessageBox.warning(self, "נתונים", "אין היסטוריה לסניף זה"); return
+
+        # Sprint C5.4: סנן גם לקטגוריות שנבחרו ב-list משמאל (אם נבחרו).
+        # לפני התיקון הטאב הציג סך-הכל-של-הסניף בגרף, גם כשהמשתמש
+        # סינן קטגוריות — המספרים הופיעו פי-3-5 גבוהים מהקטגוריות-הנבחרות.
+        sel_cats = self._sel_cats()
+        if sel_cats:
+            hist = hist_full[hist_full['luggage_type'].isin(sel_cats)]
+            if hist.empty:
+                QMessageBox.warning(self, "נתונים",
+                    "אין היסטוריה לקטגוריות שנבחרו בסניף זה. נסה לבטל סינון.")
+                return
+        else:
+            hist = hist_full
 
         # pivot: 6 חודשים אחרונים
         last6 = sorted(hist['year_month'].unique())[-6:]
@@ -948,7 +966,7 @@ class ForecastTab(QWidget):
         pivot = pivot.reindex(columns=last6, fill_value=0)
         self._fill_snap_hist_table(pivot)
 
-        # series כוללת
+        # series — סך-הכל של ה-history המסונן (סניף + קטגוריות-נבחרות)
         agg = hist.groupby('year_month')['quantity'].sum().sort_index()
         series = pd.Series(agg.values, index=agg.index)
 
@@ -959,6 +977,8 @@ class ForecastTab(QWidget):
         # Sprint C5.2: לעבור גם לסניף-הנבחר ל-weekly_cell
         snap_ctx = dict(self._build_context())
         snap_ctx['_selected_branches'] = [code]
+        if sel_cats:
+            snap_ctx['_selected_categories'] = sel_cats
         self._snap_worker = BranchSnapshotWorker(
             series, hist, self.fdb.get_events(), snap_ctx)
         self._snap_worker.progress.connect(self.snap_status.setText)
@@ -1394,7 +1414,15 @@ class ForecastTab(QWidget):
             ar = d['arima']['forecast'].values[:h].sum()
             xg = d['xgboost']['forecast'].values[:h].sum()
             av = round((ar + xg) / 2)
-            nv = d['newsvendor']
+
+            # Sprint C5.4: לחשב newsvendor מחדש לפי ה-horizon הנבחר. לפני התיקון
+            # ה-newsvendor חישב תמיד על-בסיס 6 חודשים, כך ש-"חודש הבא" ו-"6 חודשים"
+            # הציגו אותה המלצה — לא הגיוני.
+            std_per_month = d.get('std_per_month', 0)
+            nv = newsvendor_order(
+                mean_demand=float(av),
+                std_demand=float(std_per_month * (h ** 0.5)),
+            )
 
             cells = [
                 (cat,                  '#2c3e50', False),
@@ -1507,17 +1535,22 @@ class ForecastTab(QWidget):
             horizon = {"3 חודשים": 3, "6 חודשים": 6,
                        "9 חודשים": 9, "12 חודשים": 12}.get(horizon_text, 6)
 
-            # למצוא את החודש האחרון עם נתון
+            # למצוא את החודש האחרון עם נתון. Sprint C5.4: מעדיף את MAX
+            # של forecast_history (הנתון הסופי-המדויק) על-פני flight_traffic,
+            # כי flight_traffic לפעמים דוחה חודש בגלל QA-warning.
             from db_config import get_conn
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        SELECT MAX(year_month) FROM flight_traffic
-                        WHERE arriving_passengers IS NOT NULL AND notes = 'ok'
+                        SELECT GREATEST(
+                            (SELECT MAX(year_month) FROM forecast_history),
+                            (SELECT MAX(year_month) FROM flight_traffic
+                             WHERE arriving_passengers IS NOT NULL AND notes = 'ok')
+                        )
                     """)
                     last_ym = cur.fetchone()[0]
             if not last_ym:
-                self.scen_status.setText("אין נתוני flight_traffic זמינים")
+                self.scen_status.setText("אין נתוני בסיס זמינים")
                 return
 
             result = forecast_all_scenarios(last_ym, horizon, regime)
