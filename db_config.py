@@ -7,6 +7,8 @@ from urllib.parse import urlparse, unquote
 from dotenv import load_dotenv
 from psycopg2 import pool as _pool
 
+from logger import logger
+
 # טוען .env.local קודם (לעדיפות מקומית), נופל ל-.env לתאימות לאחור
 _HERE = Path(__file__).parent
 if (_HERE / '.env.local').exists():
@@ -89,8 +91,10 @@ def get_conn(*, autocommit: bool = False):
         if not autocommit:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as rb_err:
+                # rollback-of-rollback is best-effort; we still want to raise
+                # the original exception. log at DEBUG so we know if it happens.
+                logger.debug("rollback failed during exception handling: %s", rb_err)
         raise
     else:
         if not autocommit:

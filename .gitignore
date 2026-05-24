@@ -39,7 +39,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # Installer artifacts (built locally)
 Output/
 *.dump
+*.zip

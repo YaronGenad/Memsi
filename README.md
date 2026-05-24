@@ -21,7 +21,7 @@ beyond the company network.
 * **Product Identification** - export unidentified items to CSV, fill in
   brand-grade / size / material, import back. Writes go straight to the DB,
   changes take effect immediately, no restart.
-* **Forecasting** - ARIMA / Prophet / XGBoost per branch and per category,
+* **Forecasting** - 5 models (naive-prev / regime-aware / flight-rate / causal / per-cell weekly) per branch and per category,
   with context for war / military operation / holidays / summer peak. Every
   run is saved with backtest metrics (MAE / RMSE / MAPE) computed against the
   last 6 months.
@@ -59,7 +59,7 @@ internal network. To run on multiple machines, point them at the same DB.
 | ERP fetch | `fetch_combined.py` | OData with pagination, retry, year-month cache |
 | Cache | `cache_manager.py` | INSERTs into `documents` and `logfile` with ON CONFLICT (the partial unique index handling on logfile lives here) |
 | Domain | `domain_repository.py` | The only module that talks directly to the business tables (prices, branches, warehouses, luggage). In-memory cache with RLock + audit log |
-| Forecast | `forecast_engine.py`, `forecast_evaluation.py`, `forecast_cache.py`, `forecast_db.py`, `forecast_tab.py` | ARIMA / Prophet / XGBoost + Newsvendor; backtest on last 6 months; pickle cache keyed by hash of inputs |
+| Forecast | `forecast_engine.py`, `forecast_weekly_cell.py`, `causal_forecast.py`, `forecast_evaluation.py`, `forecast_cache.py`, `forecast_db.py`, `forecast_tab.py` | 5 forecast models (see "Forecasting models" below) + Newsvendor; backtest on last 6 months; pickle cache keyed by hash of inputs |
 | DB infra | `db_config.py` | `ThreadedConnectionPool` with lazy init + `get_conn()` context manager |
 | Migrations | `migrate.py`, `migrations/` | Simple runner with a `schema_version` table. Runs `.sql` and `.py` files in alphabetic order |
 | Logging | `logger.py` | TimedRotatingFileHandler at `~/.memsi/logs/memsi.log` |
@@ -93,16 +93,27 @@ schema_version          tracks which migrations have run
 
 ## Forecasting models
 
-`forecast_engine.py` runs three models in parallel, each with event context:
+`forecast_engine.py` runs five models in parallel, each with event context.
+Internal function names (`forecast_arima`/`forecast_prophet`/`forecast_xgboost`)
+were kept for API stability but the implementations were swapped in Sprint C4
+after a 12-model sandbox showed the originals were overfitting on 38 months
+of data with regime shifts:
 
-* **ARIMA** - SARIMAX(1,1,1)x(1,1,1,12), captures yearly seasonality. Falls
-  back to MA(6) if it fails to converge.
-* **Prophet** - with regressors for war / operation / ceasefire / holiday /
-  summer peak / routine / November.
-* **XGBoost** - lag features (1, 2, 3, 12) + rolling means + sin/cos of month
-  + event flags.
-* **Newsvendor** - on the average of the three models, returns
-  `order_quantity` and `safety_stock`.
+* **חודש קודם** (was ARIMA) - naive last-value with ±σ from rolling 12-month
+  std. MAE=242 on per-cell backtest, the best simple baseline on this data.
+* **מותאם-regime** (was Prophet) - naive_prev scaled by historical ratio of
+  the target regime vs current regime. Sane response to context: HIGH→+74%,
+  MEDIUM→-23%, LOW unchanged.
+* **תחזית-טיסות** (was XGBoost) - `rate = qty/flights` over last 6 months,
+  prediction = `rate × planned_flights[ym]` from IAA flight schedule.
+* **סיבתי** (Causal) - `repairs = n_core_branches × rate[regime] × flights / 100K`.
+  MAPE 14.9% on backtest.
+* **פר-cell (שבועי)** (Sprint C5) - LinearRegression over week × branch ×
+  category (~70K training cells with 30+ features). 22% better than naive
+  on non-zero cells.
+* **Newsvendor** - on the average of the first three models, returns
+  `order_quantity` and `safety_stock`. Recalculated per horizon in the
+  procurement tab (mean × h, std × √h).
 
 `forecast_evaluation.backtest()` trains each model on `series[:-6]` and
 evaluates on the last 6 months. MAE / RMSE / MAPE are persisted to
