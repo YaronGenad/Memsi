@@ -34,7 +34,7 @@ warnings.filterwarnings('ignore')
 #          ל-XGBoost ו-Prophet. flight_volume normalized ל-baseline, regime
 #          מקודד כ-numeric (LOW=0, MEDIUM=1, HIGH=2).
 # ────────────────────────────────────────────────
-MODEL_VERSION = "3"
+MODEL_VERSION = "4"
 
 
 # ────────────────────────────────────────────────
@@ -699,6 +699,26 @@ def run_all_models(series: pd.Series, horizon: int,
         logger.exception("Causal failed in run_all_models")
         model_errors['causal'] = f"{type(e).__name__}: {e}"
         results['causal'] = None
+
+    # Sprint C5: מודל פר-cell. אומן על שבועיים × סניף × קטגוריה
+    # (~70K נקודות). הציג 22% שיפור MAE על cells לא-אפסיים ב-sandbox.
+    # נקרא רק אם context מכיל פיצ'רים החדשים (anxiety, economy_open וכו') —
+    # אחרת מדלגים. הרצה לוקחת ~10 שניות לכל המודל.
+    has_new_ctx = any(k in (context or {}) for k in
+                       ('anxiety', 'economy_open', 'flight_capacity'))
+    if has_new_ctx:
+        try:
+            from forecast_weekly_cell import forecast_total_by_cell
+            _note("  מריץ פר-cell (weekly)...")
+            results['weekly_cell'] = forecast_total_by_cell(
+                series, horizon, events_df, context
+            )
+        except Exception as e:
+            logger.exception("weekly_cell failed in run_all_models")
+            model_errors['weekly_cell'] = f"{type(e).__name__}: {e}"
+            results['weekly_cell'] = None
+    else:
+        results['weekly_cell'] = None
 
     if model_errors:
         results['model_errors'] = model_errors

@@ -190,11 +190,13 @@ class ForecastChart(QWidget):
 
         # Sprint C4 (2026-05): השמות הפנימיים נשמרו (arima/prophet/xgboost)
         # לתאימות API; אבל הם בעצם naive_prev / regime_naive / flight_rate.
+        # Sprint C5: נוסף weekly_cell — LinearRegression על שבוע × סניף × קטגוריה.
         MODEL_CFG = [
-            ('arima',   '#3498db', 'חודש קודם'),
-            ('prophet', '#27ae60', 'מותאם-regime'),
-            ('xgboost', '#e67e22', 'תחזית-טיסות'),
-            ('causal',  '#9b59b6', 'נוסחה סיבתית'),
+            ('arima',       '#3498db', 'חודש קודם'),
+            ('prophet',     '#27ae60', 'מותאם-regime'),
+            ('xgboost',     '#e67e22', 'תחזית-טיסות'),
+            ('causal',      '#9b59b6', 'נוסחה סיבתית'),
+            ('weekly_cell', '#e91e63', 'פר-cell (שבועי)'),
         ]
         # Sprint C2.5: legend מציג גם דיוק לכל מודל
         # (מחושב מ-MAE / mean(history)). מחזק את הקריאוּת של הגרף.
