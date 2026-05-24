@@ -165,19 +165,17 @@ def _logfile_full_initial_done() -> bool:
             return cur.fetchone() is not None
 
 
-def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
-    """Sprint B2: מעדכן logfile_full (תנועות-מלאי), מסווג IC docs, מעדכן
-    kit_bom (BOM של סטים) ואת local_inventory (מלאי-אמיתי אחרי פירוק).
-    ה-BOM משתנה לאט; מעדכנים אותו רק פעם בשבוע כדי לא להעמיס."""
-    from datetime import date
-    from kit_bom_builder import rebuild_bom
-    from local_inventory_calculator import rebuild_local_inventory_from_partbal
+def sync_logfile_full(lg: logging.Logger) -> dict:
+    """Sprint C7.1 step 1/3 — סנכרון logfile_full + classify_ic_docs.
+
+    איטי (5-12 דקות בריצה ראשונה, ~5-7 דקות בריצה רגילה).
+    כולל את logfile_full incremental (1404 SKUs × API call) ואת classification
+    של IC-docs. צריך לרוץ לפני rebuild_local_inventory_from_partbal כדי שה-PARTBAL
+    יראה את ה-IC החדשים, אבל זה לא חובה לכל ריצת-רענון.
+    """
     from logfile_full_sync import incremental_sync, initial_sync, classify_ic_docs
 
     out: dict = {}
-
-    # logfile_full sync חייב לקדום ל-BOM/inventory rebuild כדי שה-rebuild
-    # יראה תנועות שנכנסו ל-Priority היום.
     if _logfile_full_initial_done():
         lg.info("logfile_full: incremental sync (last 30 days)")
         r = incremental_sync(days=30, lg=lg)
@@ -189,16 +187,29 @@ def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
         out['logfile_full_rows']   = r.get('rows_written', 0)
         out['logfile_full_skus']   = r.get('skus_processed', 0)
         out['logfile_full_errors'] = r.get('errors', 0)
-        # marker שמוזרק ל-records_pulled של ה-run הנוכחי דרך update_progress
-        # ב-run_full; ב-_logfile_full_initial_done() מחפשים אותו ב-sync_runs.
         out['logfile_full_initial_done'] = True
 
     lg.info("classify_ic_docs: starting")
     r = classify_ic_docs(lg=lg)
     out['ic_docs_classified'] = r.get('pairs', 0)
+    return out
 
-    # BOM rebuild — פעם בשבוע (יום ראשון)
-    if date.today().weekday() == 6:  # Sunday in Python (Mon=0)
+
+def sync_local_inventory(lg: logging.Logger) -> dict:
+    """Sprint C7.1 step 2/3 — build local_inventory מ-PARTBAL טרי.
+
+    איטי (~5 דקות, רובו קריאה ל-Priority PARTBAL API).
+    מנותק מ-logfile_full sync — ה-PARTBAL הוא ה-source-of-truth.
+
+    Sundays-only: weekly rebuild של kit_bom (משתנה לאט; פעם בשבוע מספיק).
+    """
+    from datetime import date
+    from kit_bom_builder import rebuild_bom
+    from local_inventory_calculator import rebuild_local_inventory_from_partbal
+
+    out: dict = {}
+
+    if date.today().weekday() == 6:  # Sunday
         lg.info("sync_kit_bom: weekly rebuild")
         r = rebuild_bom(lg=lg)
         out['bom_kits'] = r.get('kits', 0)
@@ -207,19 +218,35 @@ def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
         out['bom_kits'] = 'skipped'
         out['bom_pairs'] = 'skipped'
 
-    lg.info("sync_local_inventory: starting (from PARTBAL — Priority is source of truth)")
+    lg.info("sync_local_inventory: starting (from PARTBAL)")
     r = rebuild_local_inventory_from_partbal(lg=lg)
     out['local_inv_rows'] = r.get('rows', 0)
+    return out
 
-    # אגרגציה של forecast_history לחודשים האחרונים. בלי שזה רץ ב-nightly,
-    # התחזיות "מקבעות" על החודש האחרון שאוגרג ידנית — bug שגילינו ב-v0.13.5.
-    lg.info("sync_forecast_history: aggregating recent months")
+
+def sync_forecast_history(lg: logging.Logger) -> dict:
+    """Sprint C7.1 step 3/3 — aggregate forecast_history לחודשים האחרונים.
+
+    מהיר (~5 שניות). לא קורא ל-Priority API; רק חישוב פנימי על cache.
+    בלי שזה רץ, התחזיות "מקבעות" על החודש האחרון שאוגרג ידנית (bug v0.13.5).
+    """
     from backfill_history import aggregate_recent_months
+    lg.info("sync_forecast_history: aggregating recent months")
     r = aggregate_recent_months(lookback_months=3)
-    out['forecast_history_months']   = r.get('months', 0)
-    out['forecast_history_rows']     = r.get('rows', 0)
-    out['forecast_history_newest']   = r.get('newest_month')
+    return {
+        'forecast_history_months': r.get('months', 0),
+        'forecast_history_rows':   r.get('rows', 0),
+        'forecast_history_newest': r.get('newest_month'),
+    }
 
+
+def sync_kit_bom_and_inventory(lg: logging.Logger) -> dict:
+    """Backwards-compatible wrapper (Sprint C7.1): מריץ את 3 השלבים בסדר.
+    משמש ע"י run_full ב-nightly. ה-GUI sync משתמש בשלבים בנפרד."""
+    out: dict = {}
+    out.update(sync_logfile_full(lg))
+    out.update(sync_local_inventory(lg))
+    out.update(sync_forecast_history(lg))
     return out
 
 

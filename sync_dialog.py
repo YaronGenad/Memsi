@@ -1,27 +1,38 @@
 # -*- coding: utf-8 -*-
 """
-sync_dialog.py — דיאלוגי-progress לסנכרון.
+sync_dialog.py — דיאלוגי-סנכרון: בחירת-שלבים + progress.
+
+זרימה:
+1. הדיאלוג נפתח במצב **selection** — checkboxes פר-שלב + הערכת-זמן.
+   המשתמש מסמן מה הוא רוצה, ולוחץ "התחל סנכרון".
+2. אחרי הלחיצה — מצב **running**: status label, progress bar, "ביטול".
+3. בסיום — title צבעוני (ירוק/כתום/אדום) + "סגור".
 
 שני סוגים:
 - SmallSyncDialog: בפינה הימנית-תחתונה, לא חוסם. נפתח כשעבר <24 שעות.
-- BigSyncDialog: מודלי במרכז המסך, חוסם. נפתח כשעבר >=24 שעות (יום מלא חלף).
+- BigSyncDialog: מודלי במרכז המסך, חוסם. נפתח כשעבר >=24 שעות.
 
-שניהם מציגים את אותו progress + step names + סטטוס סופי. הם רק שונים
-בגודל, מיקום, ומדיניות "חוסם או לא".
+הם נבדלים בגודל ומדיניות "חוסם או לא"; ה-flow זהה.
 """
 from __future__ import annotations
 from qtpy.QtCore import Qt, QPoint
 from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
-    QPushButton, QWidget,
+    QPushButton, QCheckBox, QStackedWidget, QWidget, QFrame,
 )
 
+from sync_worker import SYNC_STEPS, DEFAULT_STEPS
 
-# שמות-עברית לשלבים, ל-UI
+
+# שמות-עברית לשלבים בזמן running (סטטוס פעיל)
 _STEP_LABELS = {
-    'priority_rolling': 'מושך נתונים מ-Priority...',
-    'partbal':          'מעדכן תמונת מלאי...',
-    'iaa':              'בודק נתוני נחיתות חדשים...',
+    'priority_rolling': 'מושך מסמכים ותנועות מ-Priority...',
+    'partbal':          'מעדכן תמונת-מלאי מ-PARTBAL...',
+    'logfile_full':     'מסנכרן תנועות-מלאי מלאות (זה לוקח זמן)...',
+    'local_inventory':  'בונה מלאי-מקומי + סטים...',
+    'forecast_history': 'מצבר אגרגציית-תחזית חודשית...',
+    'iaa':              'בודק נחיתות-נתב"ג חדשות...',
+    'flight_schedule':  'מושך לוח-טיסות עתידי...',
 }
 
 
@@ -35,58 +46,166 @@ def _format_pulled(pulled: dict) -> str:
         parts.append(f"{pulled['partbal_rows']:,} פריטי מלאי")
     if pulled.get('iaa_months_synced'):
         parts.append(f"{pulled['iaa_months_synced']} חודשי IAA")
+    if pulled.get('flight_schedule_rows'):
+        parts.append(f"{pulled['flight_schedule_rows']} שורות לו\"ז")
     return ' • '.join(parts) if parts else 'אין נתונים חדשים'
 
 
 class _BaseSyncDialog(QDialog):
-    """משותף לשני הסוגים. כותרת + status label + progress bar + close button."""
+    """דיאלוג עם 2 מצבים: selection ואז running.
 
-    def __init__(self, parent, worker):
+    Worker נוצר מבחוץ — הדיאלוג לא יודע לבד מתי להתחיל. ה-caller צריך
+    לקרוא ל-`exec()` או `show()`, ואז להאזין ל-signal `start_requested`
+    כדי לקבל את ה-set של השלבים שהמשתמש בחר.
+    """
+
+    # API שה-caller יכול לחבר אליו
+    from qtpy.QtCore import Signal as _Signal
+    start_requested = _Signal(set)   # set[str] של שלבים נבחרים
+    cancel_requested = _Signal()
+
+    def __init__(self, parent):
         super().__init__(parent)
-        self.worker = worker
-        self.setWindowTitle("מעדכן מסד נתונים")
+        self.setWindowTitle("סנכרון מסד נתונים")
         self._auto_close = True
+        self._worker = None
         self._build_ui()
-        self._wire_worker()
 
+    # ────────────────────────────────────────────────
+    # UI
+    # ────────────────────────────────────────────────
     def _build_ui(self):
-        v = QVBoxLayout(self)
-        v.setSpacing(10)
-        v.setContentsMargins(20, 16, 20, 16)
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        root.setContentsMargins(16, 12, 16, 12)
 
-        self.title_lbl = QLabel("מעדכן מסד נתונים מעדכון אחרון")
+        self.stack = QStackedWidget()
+        root.addWidget(self.stack)
+
+        self.stack.addWidget(self._build_selection_page())
+        self.stack.addWidget(self._build_running_page())
+
+    def _build_selection_page(self) -> QWidget:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setSpacing(8)
+        v.setContentsMargins(0, 0, 0, 0)
+
+        title = QLabel("בחרו אילו שלבים לסנכרן")
+        title.setStyleSheet("font-size:14px; font-weight:bold; color:#2c3e50;")
+        v.addWidget(title)
+
+        hint = QLabel(
+            "השלבים המסומנים מראש הם המהירים. שני הכבדים "
+            "(תנועות מלאות, מלאי-מקומי) דורשים אישור ידני."
+        )
+        hint.setStyleSheet("font-size:11px; color:#7f8c8d;")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+
+        # רשימת ה-checkboxes
+        self._step_checks: dict[str, QCheckBox] = {}
+        for name, label, eta in SYNC_STEPS:
+            cb = QCheckBox(f"{label}    [{eta}]")
+            cb.setChecked(name in DEFAULT_STEPS)
+            cb.setStyleSheet("font-size:12px; padding:2px;")
+            self._step_checks[name] = cb
+            v.addWidget(cb)
+
+        # קו מפריד
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color:#bdc3c7;")
+        v.addWidget(sep)
+
+        # כפתורים
+        h = QHBoxLayout()
+        self._cancel_select_btn = QPushButton("ביטול")
+        self._cancel_select_btn.clicked.connect(self.reject)
+        h.addWidget(self._cancel_select_btn)
+        h.addStretch()
+        self._start_btn = QPushButton("התחל סנכרון")
+        self._start_btn.setStyleSheet(
+            "background:#27ae60; color:white; padding:6px 14px; font-weight:bold;"
+        )
+        self._start_btn.clicked.connect(self._on_start_clicked)
+        h.addWidget(self._start_btn)
+        v.addLayout(h)
+
+        return page
+
+    def _build_running_page(self) -> QWidget:
+        page = QWidget()
+        v = QVBoxLayout(page)
+        v.setSpacing(10)
+        v.setContentsMargins(0, 0, 0, 0)
+
+        self.title_lbl = QLabel("מסנכרן...")
         self.title_lbl.setStyleSheet("font-size:14px; font-weight:bold; color:#2c3e50;")
         v.addWidget(self.title_lbl)
 
         self.status_lbl = QLabel("מתחבר...")
         self.status_lbl.setStyleSheet("font-size:12px; color:#34495e;")
+        self.status_lbl.setWordWrap(True)
         v.addWidget(self.status_lbl)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)  # indeterminate
         v.addWidget(self.progress)
 
-        # שורת פעולות
         h = QHBoxLayout()
         h.addStretch()
+        self._cancel_run_btn = QPushButton("בטל")
+        self._cancel_run_btn.clicked.connect(self._on_cancel_clicked)
+        h.addWidget(self._cancel_run_btn)
         self.close_btn = QPushButton("סגור")
         self.close_btn.setEnabled(False)
         self.close_btn.clicked.connect(self.accept)
         h.addWidget(self.close_btn)
         v.addLayout(h)
 
-    def _wire_worker(self):
-        self.worker.step_started.connect(self._on_step_started)
-        self.worker.step_done.connect(self._on_step_done)
-        self.worker.finished_ok.connect(self._on_ok)
-        self.worker.finished_partial.connect(self._on_partial)
-        self.worker.finished_failed.connect(self._on_failed)
+        return page
 
+    # ────────────────────────────────────────────────
+    # Selection → start
+    # ────────────────────────────────────────────────
+    def _on_start_clicked(self):
+        selected = {name for name, cb in self._step_checks.items() if cb.isChecked()}
+        if not selected:
+            self.status_lbl.setText("לא נבחרו שלבים")
+            return
+        self.start_requested.emit(selected)
+        # עוברים למצב running; ה-caller יוצר worker וקורא ל-attach_worker
+        self.stack.setCurrentIndex(1)
+
+    def _on_cancel_clicked(self):
+        if self._worker is not None and self._worker.isRunning():
+            self._cancel_run_btn.setEnabled(False)
+            self._cancel_run_btn.setText("מבטל...")
+            self.cancel_requested.emit()
+        else:
+            self.reject()
+
+    # ────────────────────────────────────────────────
+    # Worker attach (נקרא מ-gui_app אחרי start_requested)
+    # ────────────────────────────────────────────────
+    def attach_worker(self, worker):
+        """מחבר את ה-worker שה-caller יצר. חייב להיקרא אחרי start_requested."""
+        self._worker = worker
+        worker.step_started.connect(self._on_step_started)
+        worker.step_done.connect(self._on_step_done)
+        worker.finished_ok.connect(self._on_ok)
+        worker.finished_partial.connect(self._on_partial)
+        worker.finished_failed.connect(self._on_failed)
+
+    # ────────────────────────────────────────────────
+    # Running callbacks
+    # ────────────────────────────────────────────────
     def _on_step_started(self, name: str):
         self.status_lbl.setText(_STEP_LABELS.get(name, name))
 
     def _on_step_done(self, name: str, result: dict):
-        pass  # status מתעדכן בשלב הבא, או בסיום
+        pass  # status מתעדכן בשלב הבא
 
     def _on_ok(self, pulled: dict):
         self.title_lbl.setText("הסנכרון הסתיים בהצלחה")
@@ -94,9 +213,9 @@ class _BaseSyncDialog(QDialog):
         self.status_lbl.setText(_format_pulled(pulled))
         self.progress.setRange(0, 100)
         self.progress.setValue(100)
+        self._cancel_run_btn.setEnabled(False)
         self.close_btn.setEnabled(True)
         if self._auto_close:
-            # סוגר אוטומטית אחרי 2 שניות אם הצליח חלק
             from qtpy.QtCore import QTimer
             QTimer.singleShot(2000, self.accept)
 
@@ -106,19 +225,19 @@ class _BaseSyncDialog(QDialog):
         self.status_lbl.setText(
             f"{_format_pulled(pulled)}\nשגיאות:\n{errors[:300]}"
         )
-        self.status_lbl.setWordWrap(True)
         self.progress.setRange(0, 100)
         self.progress.setValue(100)
+        self._cancel_run_btn.setEnabled(False)
         self.close_btn.setEnabled(True)
-        self._auto_close = False  # תן למשתמש לקרוא
+        self._auto_close = False
 
     def _on_failed(self, error: str):
         self.title_lbl.setText("הסנכרון נכשל")
         self.title_lbl.setStyleSheet("font-size:14px; font-weight:bold; color:#e74c3c;")
         self.status_lbl.setText(error[:300])
-        self.status_lbl.setWordWrap(True)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
+        self._cancel_run_btn.setEnabled(False)
         self.close_btn.setEnabled(True)
         self._auto_close = False
 
@@ -129,19 +248,17 @@ class SmallSyncDialog(_BaseSyncDialog):
     מוצג כשעבר <24 שעות מהסנכרון האחרון: אז זה מהיר ולא קריטי.
     """
 
-    def __init__(self, parent, worker):
-        super().__init__(parent, worker)
-        self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint |
-                            Qt.FramelessWindowHint)
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setModal(False)
-        self.setFixedSize(360, 130)
+        self.setMinimumSize(420, 360)
         self.setStyleSheet(
-            "QDialog{background:#ecf0f1; border:1px solid #95a5a6; border-radius:6px;}"
+            "QDialog{background:#ecf0f1;}"
         )
 
     def showEvent(self, event):
         super().showEvent(event)
-        # ממקם בפינה הימנית-תחתונה של המסך-של-ה-app
         if self.parent():
             geo = self.parent().geometry()
             x = geo.right() - self.width() - 20
@@ -156,13 +273,12 @@ class BigSyncDialog(_BaseSyncDialog):
     מתחיל לעבוד — מבטיח שהנתונים שמוצגים מעודכנים.
     """
 
-    def __init__(self, parent, worker):
-        super().__init__(parent, worker)
+    def __init__(self, parent):
+        super().__init__(parent)
         self.setModal(True)
-        self.setFixedSize(480, 200)
+        self.setMinimumSize(520, 420)
         self.title_lbl.setText("מעדכן מסד נתונים מעדכון אחרון, נא להמתין")
 
     def _on_ok(self, pulled: dict):
         super()._on_ok(pulled)
-        # ב-Big לא לסגור אוטומטית — תן למשתמש לראות שהסתיים
-        self._auto_close = False
+        self._auto_close = False  # תן למשתמש לראות שהסתיים
