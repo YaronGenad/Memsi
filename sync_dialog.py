@@ -24,15 +24,15 @@ from qtpy.QtWidgets import (
 from sync_worker import SYNC_STEPS, DEFAULT_STEPS
 
 
-# שמות-עברית לשלבים בזמן running (סטטוס פעיל)
+# שמות-עברית קצרים לשלבים — לתצוגה כשרצים כמה במקביל (tier-based).
 _STEP_LABELS = {
-    'priority_rolling': 'מושך מסמכים ותנועות מ-Priority...',
-    'partbal':          'מעדכן תמונת-מלאי מ-PARTBAL...',
-    'logfile_full':     'מסנכרן תנועות-מלאי מלאות (זה לוקח זמן)...',
-    'local_inventory':  'בונה מלאי-מקומי + סטים...',
-    'forecast_history': 'מצבר אגרגציית-תחזית חודשית...',
-    'iaa':              'בודק נחיתות-נתב"ג חדשות...',
-    'flight_schedule':  'מושך לוח-טיסות עתידי...',
+    'priority_rolling': 'מסמכים+תנועות',
+    'partbal':          'מלאי-Priority',
+    'logfile_full':     'תנועות-מלאות',
+    'local_inventory':  'מלאי-מקומי+סטים',
+    'forecast_history': 'אגרגציית-תחזית',
+    'iaa':              'נחיתות-נתב"ג',
+    'flight_schedule':  'לוח-טיסות',
 }
 
 
@@ -69,6 +69,7 @@ class _BaseSyncDialog(QDialog):
         self.setWindowTitle("סנכרון מסד נתונים")
         self._auto_close = True
         self._worker = None
+        self._active_steps: list[str] = []  # ordered, פר-tier יש כמה
         self._build_ui()
 
     # ────────────────────────────────────────────────
@@ -202,10 +203,22 @@ class _BaseSyncDialog(QDialog):
     # Running callbacks
     # ────────────────────────────────────────────────
     def _on_step_started(self, name: str):
-        self.status_lbl.setText(_STEP_LABELS.get(name, name))
+        if name not in self._active_steps:
+            self._active_steps.append(name)
+        self._refresh_active_label()
 
     def _on_step_done(self, name: str, result: dict):
-        pass  # status מתעדכן בשלב הבא
+        if name in self._active_steps:
+            self._active_steps.remove(name)
+        self._refresh_active_label()
+
+    def _refresh_active_label(self):
+        if not self._active_steps:
+            self.status_lbl.setText("מסיים...")
+            return
+        labels = [_STEP_LABELS.get(n, n) for n in self._active_steps]
+        prefix = "מסנכרן במקביל: " if len(labels) > 1 else "מסנכרן: "
+        self.status_lbl.setText(prefix + " • ".join(labels))
 
     def _on_ok(self, pulled: dict):
         self.title_lbl.setText("הסנכרון הסתיים בהצלחה")

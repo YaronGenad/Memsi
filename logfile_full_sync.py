@@ -13,7 +13,9 @@ logfile_full_sync.py — סנכרון logfile_full (תנועות-מלאי מלא
 from __future__ import annotations
 import logging
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from collections import defaultdict
 
@@ -26,7 +28,11 @@ from kit_bom_builder import _is_luggage_sku
 
 
 REQUEST_TIMEOUT = 60
-SLEEP_BETWEEN = 0.3
+# Sprint C7.2: 4 workers במקביל. כשמקבילים, אין צורך ב-sleep גדול בין
+# קריאות (ה-workers ממילא פורסים את הלחץ). אם Priority מחזיר 429, להעלות
+# את SLEEP או להוריד את PRIORITY_API_WORKERS דרך env.
+SLEEP_BETWEEN = 0.0
+PRIORITY_API_WORKERS = int(os.environ.get('PRIORITY_API_WORKERS', '4'))
 
 
 def _fetch_logfile_for_sku(session: requests.Session, base_url: str,
@@ -78,62 +84,110 @@ def _list_luggage_skus_from_db() -> list[str]:
     return sorted(luggage)
 
 
+# thread-local session: כל thread שמושך נתונים יוצר session משלו בפעם
+# הראשונה, ושומר אותו בין קריאות. requests.Session לא thread-safe בין threads,
+# אבל בתוך thread יחיד היא כן יעילה (keep-alive).
+_thread_local = threading.local()
+
+
+def _get_session() -> requests.Session:
+    s = getattr(_thread_local, 'session', None)
+    if s is None:
+        s = requests.Session()
+        s.headers['Authorization'] = os.environ['PRIORITY_AUTH_HEADER']
+        _thread_local.session = s
+    return s
+
+
+def _fetch_and_write_one(sku: str, base_url: str,
+                         min_date: str | None = None) -> int:
+    """מושך + כותב מק"ט בודד. מחזיר מספר שורות שנכתבו. ל-Executor."""
+    session = _get_session()
+    rows = _fetch_logfile_for_sku(session, base_url, sku, min_date=min_date)
+    if rows:
+        _write_rows(rows)
+        if SLEEP_BETWEEN > 0:
+            time.sleep(SLEEP_BETWEEN)
+        return len(rows)
+    if SLEEP_BETWEEN > 0:
+        time.sleep(SLEEP_BETWEEN)
+    return 0
+
+
 def initial_sync(lg: logging.Logger | None = None) -> dict:
     """סנכרון ראשוני: מושך את כל ההיסטוריה לכל מק"ט-של-מזוודות שאנחנו מכירים.
-    איטי (כמה דקות-לעשרות) אבל רץ פעם אחת."""
+    Sprint C7.2: רץ ב-ThreadPoolExecutor במקביל."""
     lg = lg or logger
     base_url = os.environ['PRIORITY_BASE_URL']
-    auth = os.environ['PRIORITY_AUTH_HEADER']
-    session = requests.Session()
-    session.headers['Authorization'] = auth
 
     skus = _list_luggage_skus_from_db()
-    lg.info("logfile_full initial_sync: %d luggage SKUs to fetch", len(skus))
+    lg.info("logfile_full initial_sync: %d luggage SKUs to fetch, %d workers",
+            len(skus), PRIORITY_API_WORKERS)
 
     total_rows = 0
     errors = 0
-    for i, sku in enumerate(skus, start=1):
-        if i % 50 == 0:
-            lg.info("logfile_full initial_sync: %d/%d, rows so far: %d",
-                    i, len(skus), total_rows)
-        try:
-            rows = _fetch_logfile_for_sku(session, base_url, sku)
-            if rows:
-                _write_rows(rows)
-                total_rows += len(rows)
-        except Exception as e:
-            lg.warning("logfile_full initial_sync: %s failed: %s", sku, e)
-            errors += 1
-        time.sleep(SLEEP_BETWEEN)
+    done = 0
+    progress_lock = threading.Lock()
+
+    with ThreadPoolExecutor(max_workers=PRIORITY_API_WORKERS,
+                            thread_name_prefix='logfile-full') as ex:
+        futures = {ex.submit(_fetch_and_write_one, sku, base_url): sku
+                   for sku in skus}
+        for fut in as_completed(futures):
+            sku = futures[fut]
+            try:
+                n = fut.result()
+            except Exception as e:
+                lg.warning("logfile_full initial_sync: %s failed: %s", sku, e)
+                errors += 1
+                n = 0
+            with progress_lock:
+                total_rows += n
+                done += 1
+                if done % 50 == 0:
+                    lg.info("logfile_full initial_sync: %d/%d, rows so far: %d",
+                            done, len(skus), total_rows)
 
     return {'skus_processed': len(skus), 'rows_written': total_rows, 'errors': errors}
 
 
 def incremental_sync(days: int = 30, lg: logging.Logger | None = None) -> dict:
     """סנכרון אינקרמנטלי: רק N הימים האחרונים, לכל המק"טים הידועים.
-    משתמש ב-ON CONFLICT DO NOTHING כך שתנועות ישנות לא יחזרו."""
+    Sprint C7.2: רץ ב-ThreadPoolExecutor במקביל."""
     lg = lg or logger
     base_url = os.environ['PRIORITY_BASE_URL']
-    auth = os.environ['PRIORITY_AUTH_HEADER']
-    session = requests.Session()
-    session.headers['Authorization'] = auth
 
     skus = _list_luggage_skus_from_db()
     cutoff = (date.today() - timedelta(days=days)).strftime('%Y-%m-%d')
-    lg.info("logfile_full incremental_sync: %d SKUs, cutoff=%s", len(skus), cutoff)
+    lg.info("logfile_full incremental_sync: %d SKUs, cutoff=%s, %d workers",
+            len(skus), cutoff, PRIORITY_API_WORKERS)
 
     total_rows = 0
-    for i, sku in enumerate(skus, start=1):
-        try:
-            rows = _fetch_logfile_for_sku(session, base_url, sku, min_date=cutoff)
-            if rows:
-                _write_rows(rows)
-                total_rows += len(rows)
-        except Exception as e:
-            lg.warning("logfile_full incremental: %s failed: %s", sku, e)
-        time.sleep(SLEEP_BETWEEN)
+    errors = 0
+    done = 0
+    progress_lock = threading.Lock()
 
-    return {'skus_processed': len(skus), 'rows_attempted': total_rows}
+    with ThreadPoolExecutor(max_workers=PRIORITY_API_WORKERS,
+                            thread_name_prefix='logfile-inc') as ex:
+        futures = {ex.submit(_fetch_and_write_one, sku, base_url, cutoff): sku
+                   for sku in skus}
+        for fut in as_completed(futures):
+            sku = futures[fut]
+            try:
+                n = fut.result()
+            except Exception as e:
+                lg.warning("logfile_full incremental: %s failed: %s", sku, e)
+                errors += 1
+                n = 0
+            with progress_lock:
+                total_rows += n
+                done += 1
+                if done % 100 == 0:
+                    lg.info("logfile_full incremental_sync: %d/%d, rows so far: %d",
+                            done, len(skus), total_rows)
+
+    return {'skus_processed': len(skus), 'rows_attempted': total_rows,
+            'errors': errors}
 
 
 def _write_rows(rows: list[dict]) -> None:

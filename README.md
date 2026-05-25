@@ -222,6 +222,31 @@ IAA monthly flight-traffic PDFs that have been published since the last run.
 Every run logs to `sync_runs` so the GUI status bar can show
 "נתונים נכון ל-{timestamp}".
 
+### Performance (Sprint C7.2)
+
+The GUI sync ("סנכרן עכשיו") runs steps in three tiers, with steps inside a
+tier executing concurrently:
+
+```
+Tier 1 (parallel): priority_rolling, partbal, iaa, flight_schedule
+Tier 2 (parallel): logfile_full, local_inventory
+Tier 3:            forecast_history
+```
+
+`logfile_full` also parallelizes its internal per-SKU API loop. The
+concurrency level is tuned by `PRIORITY_API_WORKERS` (default `4`). If
+Priority OData starts returning 429 or other throttling errors, drop this to
+`2`:
+
+```
+# .env
+PRIORITY_API_WORKERS=2
+```
+
+`nightly_sync.py` (the unattended job) stays sequential on purpose — it
+runs at 23:00 when other systems may be using the Priority API, and
+politeness matters more than speed at night.
+
 ### Scheduling (Windows)
 
 ```powershell
