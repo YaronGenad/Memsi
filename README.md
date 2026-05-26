@@ -169,19 +169,32 @@ and harmless if the tables already exist.
 
 ## Dependencies
 
+**PostgreSQL 15+** required. Migration `009_per_cell_forecasts.sql` uses
+`NULLS NOT DISTINCT` on unique indexes, which is a PG 15 feature. Ubuntu
+22.04 ships PG 14 by default; install PG 15 from the PostgreSQL apt
+repository there, or use a managed service that defaults to a current
+version.
+
+Python packages:
+
 ```
 PyQt6 + qtpy        UI
 psycopg2-binary     DB
 pandas, openpyxl    DataFrames + Excel
 requests, tenacity  HTTP + retry
-statsmodels         ARIMA
-prophet             Prophet
-xgboost             XGBoost
+scikit-learn        weekly_cell forecast (LinearRegression)
 scipy               Newsvendor (norm.ppf)
 matplotlib          forecast tab charts
+pdfplumber          IAA monthly PDF parsing
 python-bidi         RTL handling for matplotlib
 python-dotenv       .env loader
+pyluach             Hebrew calendar (holidays)
 ```
+
+Note: `statsmodels`, `prophet`, and `xgboost` were removed in Sprint C7.5
+(v0.16.6). The internal function names `forecast_arima` / `forecast_prophet`
+/ `forecast_xgboost` are retained for API stability, but the implementations
+were swapped to simpler models in Sprint C4. See "Forecasting models" above.
 
 ## Adding a customer / changing a price / adding a luggage description
 

@@ -85,11 +85,14 @@ def sync_priority_rolling(days: int, lg: logging.Logger) -> dict:
 
     # למחוק מ-cache את החודשים שבטווח כדי שה-INSERT...ON CONFLICT לא ידחה
     # rows ישנים שהשתנו (retroactive edits).
+    #
+    # Sprint C7.5: clear+fetch+save מאוחדים פר-חודש. עד C7.4 היה two-pass —
+    # קודם clear של כל החודשים, ואז fetch של כולם. אם ה-API נפל בפס השני
+    # (אחרי שמחקנו את חודש N אבל לפני שמשכנו אותו), חודש N נשאר ריק עד
+    # הריצה הבאה. עכשיו כל חודש נשמר מהcache הישן עד הרגע שלפני שאנחנו
+    # מושכים אותו מחדש — אם המשיכה נופלת, ה-data הישן נשאר.
     cache = CacheManager()
     months = _months_in_range(start, end)
-    for ym in months:
-        lg.debug("clearing cache for %s before re-pull", ym)
-        cache.clear_month_data(ym)
 
     counts = {'documents': 0, 'logfile': 0}
     for ym in months:
@@ -100,11 +103,16 @@ def sync_priority_rolling(days: int, lg: logging.Logger) -> dict:
 
         lg.info("pulling month %s", ym)
         docs = fetch_documents(m_start, m_end)
+        logs = fetch_logfile(m_start, m_end)
+
+        # רק אחרי שגם documents וגם logfile נמשכו בהצלחה — מנקים ושומרים.
+        lg.debug("clearing cache for %s before save", ym)
+        cache.clear_month_data(ym)
+
         cache.save_documents(docs, ym)
         cache.update_metadata('documents', ym, m_start, m_end, len(docs))
         counts['documents'] += len(docs)
 
-        logs = fetch_logfile(m_start, m_end)
         cache.save_logfile(logs, ym)
         cache.update_metadata('logfile', ym, m_start, m_end, len(logs))
         counts['logfile'] += len(logs)

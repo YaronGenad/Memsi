@@ -6,9 +6,6 @@ python-dateutil
 PyQt6
 qtpy
 matplotlib
-statsmodels
-prophet
-xgboost
 scikit-learn
 scipy
 python-bidi
