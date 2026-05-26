@@ -82,6 +82,32 @@ def _audit(cur, table_name: str, op: str, key: dict,
     ))
 
 
+def audit_bulk_op(table_name: str, op: str, summary: dict,
+                  user: str | None = None) -> None:
+    """Sprint C7.8: תיעוד פעולת-bulk (TRUNCATE + INSERT) ב-domain_audit_log
+    כשורה יחידה. בניגוד ל-_audit שמיועד לכתיבת-שורה-בודדת ומקבל cursor
+    קיים, audit_bulk_op פותח conn משלו ומיועד לקריאה מ-modules אחרים
+    שאחרי שביצעו את ה-bulk write.
+
+    summary: dict JSON-friendly, למשל {'rows': 1234, 'duration_s': 12.3}.
+    user: שם משתמש; default = 'nightly_sync' אם לא נתון (זה מקור הקריאה
+    הסביר ביותר ל-bulk ops).
+    """
+    if user is None:
+        user = 'nightly_sync'
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO domain_audit_log
+                (table_name, operation, key_json, old_values, new_values, changed_by)
+            VALUES (%s, %s, %s::jsonb, NULL, %s::jsonb, %s)
+        """, (
+            table_name, op,
+            '{}',
+            json.dumps(summary, ensure_ascii=False),
+            user,
+        ))
+
+
 # ────────────────────────────────────────────────
 #  Customers + pricing tiers
 # ────────────────────────────────────────────────

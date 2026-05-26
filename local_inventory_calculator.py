@@ -138,6 +138,15 @@ def rebuild_local_inventory_from_partbal(lg: logging.Logger | None = None) -> di
 
     duration = (datetime.now() - start).total_seconds()
     lg.info("local_inv (partbal) rebuild done: %d rows, %.1fs", len(rows), duration)
+
+    # Sprint C7.8: שורת-סיכום ב-domain_audit_log.
+    try:
+        from domain_repository import audit_bulk_op
+        audit_bulk_op('local_inventory', 'REBUILD',
+                      {'rows': len(rows), 'duration_s': round(duration, 1)})
+    except Exception:
+        lg.exception("local_inv: audit_bulk_op failed (non-fatal)")
+
     return {'rows': len(rows), 'duration_seconds': round(duration, 1)}
 
 

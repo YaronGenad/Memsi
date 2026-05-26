@@ -33,8 +33,20 @@ from pathlib import Path
 #  Logging נפרד מ-app log
 # ────────────────────────────────────────────────
 def _setup_logging(verbose: bool = False) -> logging.Logger:
-    log_dir = Path(os.path.expanduser('~/.memsi/logs'))
-    log_dir.mkdir(parents=True, exist_ok=True)
+    # Sprint C7.8: env override + fallback. אותה לוגיקה כמו ב-logger.py
+    # (אבל קובץ-יום נפרד לפי תאריך).
+    import tempfile
+    env_dir = os.environ.get('MEMSI_LOG_DIR', '').strip()
+    log_dir = Path(env_dir).expanduser() if env_dir else Path(os.path.expanduser('~/.memsi/logs'))
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError) as e:
+        log_dir = Path(tempfile.gettempdir()) / 'memsi_logs'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        sys.stderr.write(
+            f"WARN: nightly_sync cannot write to home log dir: {e}; "
+            f"falling back to {log_dir}\n"
+        )
     log_file = log_dir / f'nightly_{date.today().isoformat()}.log'
 
     handler = logging.FileHandler(log_file, encoding='utf-8')
