@@ -32,6 +32,13 @@ _BASE_URL     = os.environ.get('PRIORITY_BASE_URL', 'https://priority.newcinema.
 DOCUMENTS_URL = f"{_BASE_URL}/DOCUMENTS_D"
 LOGFILE_URL   = f"{_BASE_URL}/LOGFILE"
 
+
+def odata_escape(val: str) -> str:
+    """OData v4 string-literal escape: גרש בודד נכפל (`'` → `''`).
+    שימוש: f\"CUSTNAME eq '{odata_escape(c)}'\" — בטוח גם אם ערך כולל גרש.
+    Sprint C7.6."""
+    return str(val).replace("'", "''")
+
 # Priority OData עלול להיות איטי תחת עומס; timeout של 30s היה קצר מדי
 # וגרם ל-ReadTimeout. עכשיו 120s עם 5 ניסיונות.
 ODATA_TIMEOUT = int(os.environ.get('PRIORITY_TIMEOUT', 120))
@@ -100,7 +107,9 @@ _LOGFILE_SELECT = 'LOGDOCNO,CURDATE,PARTNAME,TOPARTDES,TQUANT,UCOST,CUSTNAME'
 
 
 def fetch_documents(start_date, end_date, progress=None):
-    customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in _target_customers()])
+    customer_filter = ' or '.join(
+        [f"CUSTNAME eq '{odata_escape(c)}'" for c in _target_customers()]
+    )
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})",
         '$select': _DOCUMENTS_SELECT,
@@ -111,7 +120,9 @@ def fetch_documents(start_date, end_date, progress=None):
 
 
 def fetch_logfile(start_date, end_date, progress=None):
-    customer_filter = ' or '.join([f"CUSTNAME eq '{c}'" for c in _target_customers()])
+    customer_filter = ' or '.join(
+        [f"CUSTNAME eq '{odata_escape(c)}'" for c in _target_customers()]
+    )
     params = {
         '$filter': f"(CURDATE ge {start_date}T00:00:00Z and CURDATE le {end_date}T23:59:59Z) and ({customer_filter})",
         '$select': _LOGFILE_SELECT,

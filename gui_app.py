@@ -125,6 +125,23 @@ class MainWindow(QMainWindow):
         # bootstrap-check בלבד: וודא ש-DB נגיש ושטבלת-מפתח אחת קיימת.
         # יצירת/עדכון schema הוא תהליך נפרד דרך migrate.py — לא מתבצע כאן.
         # במקום QMessageBox חוסם, מציגים banner בשורת-הסטטוס שלא חוסם את ה-app.
+
+        # Sprint C7.6: pdfplumber נדרש ל-sync_iaa (חילוץ-מטריקות מ-PDFs).
+        # ה-IAA module עצמו עוטף את ה-import ב-try/except ומחזיר None
+        # בשקט — מה שגרם בעבר לסנכרון IAA להחזיר 0 שורות בלי שהמשתמש ידע.
+        # כאן מציגים QMessageBox חד-פעמי בעת startup אם חסר.
+        try:
+            import pdfplumber  # noqa: F401
+        except ImportError:
+            logger.warning("pdfplumber not installed — IAA sync will not function")
+            from qtpy.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "תלות חסרה",
+                "החבילה pdfplumber לא מותקנת.\n"
+                "סנכרון נחיתות-נתב\"ג (IAA) לא יחלץ נתונים חדשים.\n\n"
+                "תיקון: pip install pdfplumber",
+            )
         try:
             from db_config import get_conn
             with get_conn() as conn:

@@ -232,6 +232,13 @@ def forecast_scenario(
     horizon: int,
     flight_scenario: str = 'status_quo',
     conversion_regime: str = 'LOW',
+    # Sprint C7.6: cache-overrides. כאשר forecast_all_scenarios קורא,
+    # הוא מחשב את ה-4 helpers האלה פעם אחת ומעביר. כאשר הפונקציה נקראת
+    # ישירות (נתיב ישן/test), היא נופלת חזרה למחושב.
+    _baseline_cache: float | None = None,
+    _seasonal_cache: dict | None = None,
+    _planned_map_cache: dict | None = None,
+    _pax_ratio_cache: float | None = None,
 ) -> list[ScenarioForecast]:
     """מייצר תחזית ל-horizon חודשים קדימה, החל מהחודש שאחרי last_year_month.
 
@@ -251,13 +258,13 @@ def forecast_scenario(
 
     rates = compute_conversion_rates()
     rate = rates[conversion_regime]
-    baseline = baseline_arriving_passengers()
+    baseline = _baseline_cache if _baseline_cache is not None else baseline_arriving_passengers()
     scen_multipliers = FLIGHT_SCENARIOS[flight_scenario]['multipliers'](horizon)
-    seasonal = _seasonal_multipliers()
+    seasonal = _seasonal_cache if _seasonal_cache is not None else _seasonal_multipliers()
 
     # Sprint C5.4: נתוני flight_schedule (נתב"ג) עתידיים — מקור-האמת
-    planned_map = _planned_flights_map()
-    pax_per_flight = _flights_per_pax_ratio()
+    planned_map = _planned_map_cache if _planned_map_cache is not None else _planned_flights_map()
+    pax_per_flight = _pax_ratio_cache if _pax_ratio_cache is not None else _flights_per_pax_ratio()
 
     cur = datetime.strptime(last_year_month + '-01', '%Y-%m-%d')
     out: list[ScenarioForecast] = []
@@ -296,8 +303,23 @@ def forecast_all_scenarios(
     horizon: int,
     conversion_regime: str = 'LOW',
 ) -> dict[str, list[ScenarioForecast]]:
-    """מייצר 4 תחזיות (אחת לכל flight_scenario) ב-regime נתון."""
+    """מייצר 4 תחזיות (אחת לכל flight_scenario) ב-regime נתון.
+
+    Sprint C7.6: ה-4 helpers ש-forecast_scenario צריך קוראים ל-DB. עד C7.5
+    הם רצו 4 פעמים (פעם פר-scenario) = 16 round-trips. עכשיו רצים פעם
+    אחת בלבד והערכים מועברים פנימה.
+    """
+    baseline = baseline_arriving_passengers()
+    seasonal = _seasonal_multipliers()
+    planned_map = _planned_flights_map()
+    pax_ratio = _flights_per_pax_ratio()
     return {
-        scen: forecast_scenario(last_year_month, horizon, scen, conversion_regime)
+        scen: forecast_scenario(
+            last_year_month, horizon, scen, conversion_regime,
+            _baseline_cache=baseline,
+            _seasonal_cache=seasonal,
+            _planned_map_cache=planned_map,
+            _pax_ratio_cache=pax_ratio,
+        )
         for scen in FLIGHT_SCENARIOS
     }

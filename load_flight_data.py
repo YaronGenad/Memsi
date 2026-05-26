@@ -94,31 +94,6 @@ def _months_between(start_ym: str, end_ym: str):
         cur += relativedelta(months=1)
 
 
-def mark_historical_regimes():
-    updates = []
-    for start, end, regime in _HISTORICAL_REGIMES:
-        for ym in _months_between(start, end):
-            updates.append((regime, ym))
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # UPDATE על שורות קיימות
-            cur.executemany(
-                "UPDATE forecast_events SET conversion_regime = %s WHERE year_month = %s",
-                updates
-            )
-            updated = cur.rowcount
-            # INSERT לחודשים שאינם קיימים ב-forecast_events
-            cur.execute("""
-                INSERT INTO forecast_events (year_month, conversion_regime)
-                SELECT y.year_month, %s
-                FROM (VALUES %s) AS y(year_month, regime)
-                WHERE NOT EXISTS (SELECT 1 FROM forecast_events e
-                                  WHERE e.year_month = y.year_month)
-            """, ('LOW', tuple((ym, reg) for reg, ym in updates[:1])))  # dummy; we'll do better
-    logger.info("regime marks: attempted %d UPDATEs", len(updates))
-
-
 def mark_historical_regimes_v2():
     """גרסה פשוטה: UPSERT לכל חודש."""
     rows = []
