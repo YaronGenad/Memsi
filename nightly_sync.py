@@ -152,7 +152,12 @@ def sync_flight_schedule(lg: logging.Logger) -> dict:
 def _logfile_full_initial_done() -> bool:
     """בודק האם נמצא marker של initial-sync ב-sync_runs.records_pulled.
     זה מבטיח שגם אם logfile_full מתמלא חלקית בגלל ריצה שנפלה באמצע,
-    לא נריץ initial_sync שוב בטעות."""
+    לא נריץ initial_sync שוב בטעות.
+
+    Precondition: טבלת sync_runs קיימת. מובטח כי start_run() נקרא קודם
+    (sync_worker.py:99 או nightly_sync.run_full). אם הטבלה חסרה במכונה
+    חדשה — start_run יקרוס לפני שמגיעים לכאן, וההודעה תפנה את המשתמש
+    להריץ `python migrate.py` (README:142)."""
     from db_config import get_conn
     with get_conn() as conn:
         with conn.cursor() as cur:

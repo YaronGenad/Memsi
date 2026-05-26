@@ -12,6 +12,7 @@ forecast_engine.py
 ומחזיר pd.DataFrame עמודות: year_month, forecast, lower, upper
 """
 
+import threading
 import warnings
 import numpy as np
 import pandas as pd
@@ -44,6 +45,10 @@ _flight_cache: dict[str, float] = {}             # היסטוריה: arriving_pa
 _schedule_cache: dict[str, int] = {}              # עתיד: planned_flights (TOTAL)
 _regime_cache: dict[str, str] = {}
 _features_cache_loaded: bool = False
+# Sprint C7.3: ForecastWorker ו-ProcurementWorker שניהם QThread שיכולים
+# לקרוא ל-_load_features_cache במקביל. ה-lock מבטיח שטעינת ה-DB רצה פעם
+# אחת בלבד, ושאף קורא לא יראה state חלקי (flag=True אבל dicts ריקים).
+_features_lock = threading.Lock()
 
 
 # Sprint C5.3: ROUTINE (pre-war שגרה רגילה) ו-LOW (post-trauma) שניהם
@@ -55,47 +60,55 @@ _REGIME_TO_NUM = {'ROUTINE': -0.5, 'LOW': 0.0, 'MEDIUM': 1.0, 'HIGH': 2.0}
 def _load_features_cache() -> None:
     """טוען פעם אחת את flight_traffic + flight_schedule + conversion_regime
     מ-DB. cache בזיכרון כי הנתונים משתנים רק פעם בחודש (אחרי nightly_sync).
+
+    Thread-safe (Sprint C7.3): double-checked locking — קריאה ראשונה ללא
+    lock מהירה (hot path), אבל אם flag עוד false נכנסים ל-lock ובודקים שוב.
     """
     global _flight_cache, _schedule_cache, _regime_cache, _features_cache_loaded
     if _features_cache_loaded:
         return
-    try:
-        from db_config import get_conn
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT year_month, arriving_passengers
-                    FROM flight_traffic
-                    WHERE arriving_passengers IS NOT NULL
-                """)
-                _flight_cache = {ym: float(v) for ym, v in cur.fetchall()}
-                cur.execute("""
-                    SELECT year_month, planned_flights
-                    FROM flight_schedule
-                    WHERE airline_code = 'TOTAL'
-                """)
-                _schedule_cache = {ym: int(n) for ym, n in cur.fetchall()}
-                cur.execute("""
-                    SELECT year_month, conversion_regime
-                    FROM forecast_events
-                    WHERE conversion_regime IS NOT NULL
-                """)
-                _regime_cache = {ym: r for ym, r in cur.fetchall()}
-        _features_cache_loaded = True
-        logger.info("features cache loaded: flights=%d, schedule=%d, regimes=%d",
-                    len(_flight_cache), len(_schedule_cache), len(_regime_cache))
-    except Exception:
-        logger.exception("failed to load features cache; falling back to defaults")
-        _flight_cache = {}
-        _schedule_cache = {}
-        _regime_cache = {}
-        _features_cache_loaded = True
+    with _features_lock:
+        if _features_cache_loaded:
+            return  # thread אחר טען בזמן שחיכינו ל-lock
+        try:
+            from db_config import get_conn
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT year_month, arriving_passengers
+                        FROM flight_traffic
+                        WHERE arriving_passengers IS NOT NULL
+                    """)
+                    _flight_cache = {ym: float(v) for ym, v in cur.fetchall()}
+                    cur.execute("""
+                        SELECT year_month, planned_flights
+                        FROM flight_schedule
+                        WHERE airline_code = 'TOTAL'
+                    """)
+                    _schedule_cache = {ym: int(n) for ym, n in cur.fetchall()}
+                    cur.execute("""
+                        SELECT year_month, conversion_regime
+                        FROM forecast_events
+                        WHERE conversion_regime IS NOT NULL
+                    """)
+                    _regime_cache = {ym: r for ym, r in cur.fetchall()}
+            _features_cache_loaded = True
+            logger.info("features cache loaded: flights=%d, schedule=%d, regimes=%d",
+                        len(_flight_cache), len(_schedule_cache), len(_regime_cache))
+        except Exception:
+            logger.exception("failed to load features cache; falling back to defaults")
+            _flight_cache = {}
+            _schedule_cache = {}
+            _regime_cache = {}
+            _features_cache_loaded = True
 
 
 def invalidate_features_cache() -> None:
-    """לקריאה אחרי IAA sync או שינוי ידני ב-regimes."""
+    """לקריאה אחרי IAA sync או שינוי ידני ב-regimes.
+    Thread-safe — תחת ה-lock כדי לא להתנגש עם טעינה רצה."""
     global _features_cache_loaded
-    _features_cache_loaded = False
+    with _features_lock:
+        _features_cache_loaded = False
 
 
 def _flight_baseline() -> float:
