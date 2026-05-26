@@ -140,12 +140,21 @@ First run:
 
 ```
 python migrate.py
+python nightly_sync.py --triggered-by initial-install
 python gui_app.py
 ```
 
-`migrate.py` creates the domain tables and seeds them from the legacy code
-modules (pricing dicts, branch names, warehouses, luggage identification).
-Safe to re-run; it checks `schema_version` and skips what already ran.
+`migrate.py` creates the schema. `nightly_sync.py` (on a fresh install) pulls
+the rolling-30-day documents/logfile, the full logfile history per SKU
+(~12 min, ~1,400 SKUs), IAA flight-traffic, the flight schedule, and runs
+the forecast-history aggregation. Without this step the forecast tab opens
+to empty charts — the models need `flight_traffic` and `forecast_history`
+populated to produce anything useful.
+
+Safe to re-run; everything uses `ON CONFLICT` semantics. The standalone
+`load_flight_data.py` and `backfill_history.py` scripts cover the same
+ground for targeted re-seeds, but the canonical first-run path is
+`nightly_sync.py`.
 
 `gui_app.py` bootstraps the older cache schema (`documents`, `logfile`,
 `cache_metadata`) through `db_setup.py` on every launch. That's idempotent

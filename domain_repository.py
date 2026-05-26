@@ -400,12 +400,6 @@ def list_luggage_descriptions(category: str) -> list[str]:
     return list(by_cat.get(category, []))
 
 
-def _load_luggage_id() -> dict[str, str]:
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT description, category FROM luggage_identification")
-        return {desc: cat for desc, cat in cur.fetchall()}
-
-
 def _load_luggage_categories() -> list[str]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -495,6 +489,5 @@ def add_luggage_identification(description: str, category: str,
                'UPDATE' if old else 'INSERT',
                {'description': description}, old_val,
                {'category': category}, user)
-    invalidate('luggage_id', 'luggage_categories',
-               'luggage_by_category', 'luggage_patterns')
+    invalidate('luggage_categories', 'luggage_by_category', 'luggage_patterns')
     logger.info("add luggage_id: '%s' as %s by=%s", description, category, user)

@@ -182,33 +182,41 @@ def main():
     cache       = CacheManager()
     fdb         = ForecastDB()
 
-    print("\n[1/3] בודק ומגדיר טבלאות...")
+    # קודם בודקים מה יש לעשות, אחר-כך יודעים כמה צעדים יהיו בפועל.
+    unknown_months = fdb.get_months_for_branch('לא ידוע')
+    has_unknown = bool(unknown_months)
+    total_steps = 4 if has_unknown else 3
+    step = 1
+
+    def tag() -> str:
+        return f"[{step}/{total_steps}]"
+
+    print(f"\n{tag()} בודק ומגדיר טבלאות...")
     fdb.setup_tables()
     print("  טבלאות מוכנות")
+    step += 1
 
-    print(f"\n[2/3] מושך חודשים חסרים מה-API ({BACKFILL_START} — {BACKFILL_END})...")
+    print(f"\n{tag()} מושך חודשים חסרים מה-API ({BACKFILL_START} — {BACKFILL_END})...")
     fetch_missing_months(cache, all_months)
     print("  כל החודשים בcache")
+    step += 1
 
-    # מחק שורות "לא ידוע" ישנות ואגרג מחדש את כל החודשים שהכילו אותן
-    unknown_months = fdb.get_months_for_branch('לא ידוע')
-    if unknown_months:
-        print(f"\n[3/4] מוחק {len(unknown_months)} חודשי 'לא ידוע' ומאגרג מחדש...")
+    if has_unknown:
+        print(f"\n{tag()} מוחק {len(unknown_months)} חודשי 'לא ידוע' ומאגרג מחדש...")
         fdb.delete_branch_history('לא ידוע')
         for i, ym in enumerate(sorted(unknown_months), 1):
             records = aggregate_month(cache, ym)
             fdb.bulk_upsert_history(records)
             print(f"  [{i}/{len(unknown_months)}] {ym} — {len(records)} שורות")
-    else:
-        print("\n[3/4] אין שורות 'לא ידוע' — דילוג.")
+        step += 1
 
     covered = fdb.get_covered_months()
     to_aggregate = [m for m in all_months if m not in covered]
 
     if not to_aggregate:
-        print("\n[4/4] forecast_history כבר מלא — אין מה לאגרג.")
+        print(f"\n{tag()} forecast_history כבר מלא — אין מה לאגרג.")
     else:
-        print(f"\n[4/4] מאגרג {len(to_aggregate)} חודשים ל-forecast_history...")
+        print(f"\n{tag()} מאגרג {len(to_aggregate)} חודשים ל-forecast_history...")
         for i, ym in enumerate(to_aggregate, 1):
             records = aggregate_month(cache, ym)
             fdb.bulk_upsert_history(records)

@@ -285,20 +285,17 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _active_workers(self) -> list:
-        """אוסף QThread פעילים מכל הtabs ומ-self."""
+        """אוסף QThread פעילים מכל ה-tabs ומ-self.
+
+        Sprint C7.4: עברנו מ-`dir() + getattr()` ל-`vars().values()`.
+        dir() החזיר מאות Qt-properties שכל קריאת getattr עליהן הריצה
+        קוד C++ — על app אחרי עבודה ארוכה זה לקח שניות והקפיא את ה-UI
+        בסגירה. vars() מחזיר רק את ה-__dict__ של ה-instance, וזה מספיק
+        כי כל ה-workers נשמרים כ-`self._worker = ...` ב-tabs."""
         from qtpy.QtCore import QThread
         seen = []
-        stack = [self]
-        # אוספים מעצמנו ומכל ה-widgets-הילדים, כל QThread שיש כ-attribute
-        # על אחד מהם.
         for widget in self.findChildren(QWidget) + [self]:
-            for name in dir(widget):
-                if name.startswith('__'):
-                    continue
-                try:
-                    attr = getattr(widget, name, None)
-                except Exception:
-                    continue
+            for attr in vars(widget).values():
                 if isinstance(attr, QThread) and attr.isRunning() and attr not in seen:
                     seen.append(attr)
         return seen
