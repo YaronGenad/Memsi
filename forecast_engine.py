@@ -287,14 +287,17 @@ def forecast_arima(series: pd.Series, horizon: int,
         return _result_df(months, np.zeros(horizon))
 
     last_val = float(y[-1])
-    # רעידת-טבע: 1 std של 12 חודשים אחרונים (אם יש). ±1σ ≈ 68% interval,
-    # אבל אצלנו ה-UI מציג .lower/.upper כ-"טווח", ככל הנראה.
+    # std של 12 חודשים אחרונים (אם יש). Sprint C7.7: עברנו ל-±1.96σ
+    # (≈95% CI תחת הנחת נורמליות) במקום ±1σ (~68%). ה-safety_stock של
+    # newsvendor נשען על ה-upper הזה, ו-68% היה מוביל לחוסר-מלאי בכ-32%
+    # מהחודשים.
     recent = y[-12:] if len(y) >= 12 else y
     sigma = float(np.std(recent)) if len(recent) > 1 else last_val * 0.2
 
+    Z_95 = 1.96  # z-score for 95% two-sided CI
     pred = np.full(horizon, last_val)
-    lower = pred - sigma
-    upper = pred + sigma
+    lower = pred - Z_95 * sigma
+    upper = pred + Z_95 * sigma
     return _result_df(months, pred, lower, upper)
 
 

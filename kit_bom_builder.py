@@ -265,6 +265,10 @@ def rebuild_bom(lg: logging.Logger | None = None) -> dict:
 
 
 if __name__ == '__main__':
+    # Sprint C7.7: config check לפני שמתחילים.
+    from config_check import assert_env_configured
+    assert_env_configured('PRIORITY_AUTH_HEADER', 'PRIORITY_BASE_URL')
+
     import json
     res = rebuild_bom()
     print(json.dumps(res, ensure_ascii=False, indent=2, default=str))

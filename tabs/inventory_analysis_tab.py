@@ -11,6 +11,7 @@ from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 from fetch_combined import fetch_with_cache, combine_data
 from inventory_analysis import filter_by_attributes
 from logger import logger
+from tabs._base import format_error_for_user
 
 
 class InventoryAnalysisWorker(QThread):
@@ -177,4 +178,4 @@ class InventoryAnalysisTab(QWidget):
     def _on_error(self, tb):
         self.run_btn.setEnabled(True)
         self.status_text.append(f"\n✗ שגיאה: {tb[:800]}")
-        QMessageBox.critical(self, "שגיאה", tb[:500])
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))

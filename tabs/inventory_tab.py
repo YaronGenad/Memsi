@@ -8,6 +8,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 
 from logger import logger
+from tabs._base import format_error_for_user
 
 
 class InventoryWorker(QThread):
@@ -295,7 +296,7 @@ class InventoryTab(QWidget):
     def _on_inventory_error(self, tb):
         self.generate_btn.setEnabled(True)
         self.status_label.setText("שגיאה בשליפת מלאי")
-        QMessageBox.critical(self, "שגיאה", tb[:500])
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
 
     def _export_to_excel(self):
         if self._current_data is None or self._current_data.empty:

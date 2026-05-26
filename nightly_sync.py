@@ -105,16 +105,11 @@ def sync_priority_rolling(days: int, lg: logging.Logger) -> dict:
         docs = fetch_documents(m_start, m_end)
         logs = fetch_logfile(m_start, m_end)
 
-        # רק אחרי שגם documents וגם logfile נמשכו בהצלחה — מנקים ושומרים.
-        lg.debug("clearing cache for %s before save", ym)
-        cache.clear_month_data(ym)
-
-        cache.save_documents(docs, ym)
-        cache.update_metadata('documents', ym, m_start, m_end, len(docs))
+        # Sprint C7.7: כתיבה אטומית — clear+save+metadata בtransaction
+        # יחידה. עד C7.6 הקריאות היו ב-4 get_conn() נפרדים ו-DB drop
+        # בין clear לראשון save היה משאיר חודש ריק.
+        cache.replace_month_atomic(ym, docs, logs, m_start, m_end)
         counts['documents'] += len(docs)
-
-        cache.save_logfile(logs, ym)
-        cache.update_metadata('logfile', ym, m_start, m_end, len(logs))
         counts['logfile'] += len(logs)
 
     lg.info("sync_priority_rolling done: %s", counts)
@@ -313,10 +308,31 @@ def run_full(days: int = 30, skip_iaa: bool = False,
 
     lg.info("nightly_sync END: status=%s pulled=%s errors=%d",
             status, pulled, len(errors))
+
+    # Sprint C7.7: one-line summary ל-stdout בלבד, באנגלית, ל-monitoring.
+    # ops יכול `grep NIGHTLY_SYNC_RESULT log.txt` ולקבל קוד+מטריקות.
+    summary = (
+        f"NIGHTLY_SYNC_RESULT status={status} "
+        f"docs={pulled.get('documents', 0)} "
+        f"logs={pulled.get('logfile', 0)} "
+        f"partbal={pulled.get('partbal_rows', 0)} "
+        f"iaa_months={pulled.get('iaa_months_synced', 0)} "
+        f"errors={len(errors)} "
+        f"run_id={run_id} "
+        f"exit_code={exit_code}"
+    )
+    print(summary)
+    lg.info(summary)
+
     return exit_code
 
 
 def main():
+    # Sprint C7.7: config check לפני שמתחילים. אם .env חסר — exit ידידותי
+    # במקום KeyError על os.environ['PRIORITY_AUTH_HEADER'] במחוז הקוד.
+    from config_check import assert_env_configured
+    assert_env_configured('PRIORITY_AUTH_HEADER', 'PRIORITY_BASE_URL')
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--days', type=int, default=30,
                     help='rolling window in days (default 30)')

@@ -11,6 +11,7 @@ from dateutil.relativedelta import relativedelta
 
 from fetch_combined import fetch_with_cache, combine_data, get_target_customers
 from logger import logger
+from tabs._base import format_error_for_user
 
 
 class MultiMonthReportWorker(QThread):
@@ -156,5 +157,5 @@ class AirlineReportTab(QWidget):
 
     def _on_airline_error(self, tb):
         self.status_text.append(f"\n✗ שגיאה:\n{tb[:800]}")
-        QMessageBox.critical(self, "שגיאה", tb[:500])
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
         self.run_btn.setEnabled(True)
