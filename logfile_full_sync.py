@@ -256,6 +256,15 @@ def classify_ic_docs(lg: logging.Logger | None = None) -> dict:
     lg.info("classify_ic_docs: %d (doc, warehouse) pairs classified", len(classifications))
     n_reset = sum(1 for _, _, t in classifications if t == 'reset')
     n_add = len(classifications) - n_reset
+
+    # Sprint C7.8: שורת-סיכום ב-domain_audit_log.
+    try:
+        from domain_repository import audit_bulk_op
+        audit_bulk_op('ic_doc_classification', 'REBUILD',
+                      {'pairs': len(classifications), 'reset': n_reset, 'add': n_add})
+    except Exception:
+        lg.exception("classify_ic_docs: audit_bulk_op failed (non-fatal)")
+
     return {'pairs': len(classifications), 'reset': n_reset, 'add': n_add}
 
 

@@ -48,20 +48,24 @@ def fetch_missing_months(cache: CacheManager, months: list[str]):
         start_date  = f"{year}-{month:02d}-01"
         end_date    = f"{year}-{month:02d}-{last_day}"
 
+        # Sprint C7.8: per-month progress in English so scheduler/CI logs
+        # render cleanly on cp1255 Windows consoles. The header lines below
+        # (h1/h2) remain Hebrew — they run once and the dev reads them on
+        # an actual UTF-8 console.
         if ym not in cached_docs:
-            print(f"  [{ym}] מושך מסמכים מה-API...")
+            print(f"  [{ym}] fetching documents from API...")
             docs = fetch_documents(start_date, end_date)
             cache.save_documents(docs, ym)
             cache.update_metadata('documents', ym, start_date, end_date, len(docs))
-            print(f"  [{ym}] נשמרו {len(docs)} מסמכים")
+            print(f"  [{ym}] saved {len(docs)} documents")
             time.sleep(API_DELAY_SEC)
 
         if ym not in cached_logs:
-            print(f"  [{ym}] מושך תנועות מה-API...")
+            print(f"  [{ym}] fetching logfile from API...")
             logs = fetch_logfile(start_date, end_date)
             cache.save_logfile(logs, ym)
             cache.update_metadata('logfile', ym, start_date, end_date, len(logs))
-            print(f"  [{ym}] נשמרו {len(logs)} תנועות")
+            print(f"  [{ym}] saved {len(logs)} logfile rows")
             time.sleep(API_DELAY_SEC)
 
 

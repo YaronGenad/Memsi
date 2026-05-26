@@ -229,10 +229,26 @@ def _canvas(fig):
     return c
 
 
+class _ChartWidget(QWidget):
+    """Sprint C7.8: base-class לכל ה-chart widgets. מבטיח plt.close(self.fig)
+    בעת destroy כדי שmatplotlib backend ישחרר את ה-Figure. ה-widgets
+    הנוכחיים חיים לכל-חיי-ה-app, אז זה hygiene בלבד; אם בעתיד tab נהרס
+    דינמית, לא יהיה memory leak."""
+
+    def closeEvent(self, event):
+        try:
+            import matplotlib.pyplot as plt
+            if hasattr(self, 'fig') and self.fig is not None:
+                plt.close(self.fig)
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+
 # ════════════════════════════════════════════════
 #  Tab 1 — גרף תחזית ראשי
 # ════════════════════════════════════════════════
-class ForecastChart(QWidget):
+class ForecastChart(_ChartWidget):
     def __init__(self):
         super().__init__()
         self.fig = _new_fig(4.0)
@@ -313,7 +329,7 @@ class ForecastChart(QWidget):
 # ════════════════════════════════════════════════
 #  Tab 2 / 3 — עמודות התפלגות
 # ════════════════════════════════════════════════
-class DistChart(QWidget):
+class DistChart(_ChartWidget):
     def __init__(self):
         super().__init__()
         self.fig = _new_fig(3.8)
@@ -340,7 +356,7 @@ class DistChart(QWidget):
 # ════════════════════════════════════════════════
 #  Tab 4 — עונתיות Heatmap
 # ════════════════════════════════════════════════
-class SeasonalChart(QWidget):
+class SeasonalChart(_ChartWidget):
     MONTH_HEB = ['ינו','פבר','מרץ','אפר','מאי','יונ',
                  'יול','אוג','ספט','אוק','נוב','דצמ']
 
@@ -431,7 +447,7 @@ class BranchSnapshotWorker(QThread):
 # ════════════════════════════════════════════════
 #  Chart — תחזית לפי קטגוריה (עמודות מוערמות)
 # ════════════════════════════════════════════════
-class CategoryForecastChart(QWidget):
+class CategoryForecastChart(_ChartWidget):
     COLORS = ['#3498db','#27ae60','#e67e22','#9b59b6','#e74c3c',
               '#1abc9c','#f39c12','#2980b9','#8e44ad','#16a085']
 

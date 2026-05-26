@@ -212,6 +212,15 @@ def write_bom_to_db(bom_pairs: list[tuple[str, str]]) -> dict:
                 VALUES %s
             """, bom_pairs)
     logger.info("kit_bom: wrote %d pairs to DB", len(bom_pairs))
+    # Sprint C7.8: שורת-סיכום ב-domain_audit_log (קודם פעולות-bulk
+    # היו בלתי-מאוזנות במערכת ה-audit).
+    try:
+        from domain_repository import audit_bulk_op
+        parent_count = len({p for p, _ in bom_pairs})
+        audit_bulk_op('kit_bom', 'REBUILD',
+                      {'rows': len(bom_pairs), 'parent_skus': parent_count})
+    except Exception:
+        logger.exception("kit_bom: audit_bulk_op failed (non-fatal)")
     return {'wrote': len(bom_pairs)}
 
 
