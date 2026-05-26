@@ -17,12 +17,20 @@ from psycopg2.extras import execute_values
 from db_config import get_conn
 from logger import logger
 from forecast_engine import forecast_arima, forecast_prophet, forecast_xgboost
+from causal_forecast import forecast_causal
+from forecast_weekly_cell import forecast_total_by_cell
 
 
+# Sprint C7.6: causal ו-weekly_cell נכנסים ל-backtest כדי שה-MAE/MAPE שלהם
+# יחושב מ-test set אמיתי במקום קבועים. forecast_causal מתעלם מ-series ופונה
+# ישירות ל-DB; forecast_total_by_cell מקבל branches/categories דרך context
+# (אם חסרים → סך-כללי).
 _MODEL_FNS: dict[str, Callable] = {
-    'arima':   forecast_arima,
-    'prophet': forecast_prophet,
-    'xgboost': forecast_xgboost,
+    'arima':       forecast_arima,
+    'prophet':     forecast_prophet,
+    'xgboost':     forecast_xgboost,
+    'causal':      forecast_causal,
+    'weekly_cell': forecast_total_by_cell,
 }
 
 

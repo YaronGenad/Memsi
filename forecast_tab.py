@@ -486,6 +486,11 @@ class ForecastTab(QWidget):
         self._hist_df         = pd.DataFrame()
         self._series          = pd.Series(dtype=float)
         self._results         = {}
+        # Sprint C7.6: defaults למניעת AttributeError אם משתמש נוגע
+        # ב-UI-elements שמסתמכים על "selection אחרונה" לפני שלחץ "הרץ תחזית".
+        self._sel_labels_last: list[str] = []
+        self._sel_cats_last:   list[str] = []
+        self._last_horizon:    int       = 6
         self._init_ui()
         self._load_controls()
 
@@ -1217,24 +1222,36 @@ class ForecastTab(QWidget):
         self._results = results
         self.run_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
-        title = self._make_title(self._sel_labels_last,
-                                  self._sel_cats_last, self._last_horizon)
-        self.fc_title.setText(title)
-        self.fc_chart.plot(self._series, results)
-        self._fill_fc_table(results)
-        self._fill_nv(results.get('newsvendor', {}))
-        self._fill_desc(results.get('descriptions', {}), results.get('metrics', {}))
-        run_id = results.get('run_id')
-        suffix = f"  ·  run #{run_id}" if run_id else ''
-        self.status_label.setText(f"הושלם ✓{suffix}")
+        # Sprint C7.6: הגנה על מסלול-ההצגה. עד C7.5 חריגה ב-fc_chart.plot
+        # או _fill_fc_table הייתה נבלעת בשקט ע"י Qt — המשתמש היה רואה
+        # תוצאה חלקית בלי להבין שמשהו השתבש. עכשיו תוצאה ברורה.
+        try:
+            title = self._make_title(self._sel_labels_last,
+                                      self._sel_cats_last, self._last_horizon)
+            self.fc_title.setText(title)
+            self.fc_chart.plot(self._series, results)
+            self._fill_fc_table(results)
+            self._fill_nv(results.get('newsvendor', {}))
+            self._fill_desc(results.get('descriptions', {}), results.get('metrics', {}))
+            run_id = results.get('run_id')
+            suffix = f"  ·  run #{run_id}" if run_id else ''
+            self.status_label.setText(f"הושלם ✓{suffix}")
 
-        issues = self._validate_forecast_data(results)
-        if issues:
+            issues = self._validate_forecast_data(results)
+            if issues:
+                from logger import logger
+                logger.warning("forecast validation: %d issues: %s", len(issues), issues)
+                QMessageBox.warning(
+                    self, "אזהרת תחזית",
+                    "זוהו ערכים חריגים בתחזית:\n\n" + "\n".join(f"• {w}" for w in issues[:10]),
+                )
+        except Exception as e:
             from logger import logger
-            logger.warning("forecast validation: %d issues: %s", len(issues), issues)
-            QMessageBox.warning(
-                self, "אזהרת תחזית",
-                "זוהו ערכים חריגים בתחזית:\n\n" + "\n".join(f"• {w}" for w in issues[:10]),
+            logger.exception("_on_forecast_done failed during display")
+            self.status_label.setText("שגיאה בהצגת תוצאות")
+            QMessageBox.critical(
+                self, "שגיאה בהצגת תוצאות",
+                f"התחזית רצה, אבל הצגת התוצאות נכשלה:\n{type(e).__name__}: {e}",
             )
 
     def _on_error(self, tb):
@@ -1253,10 +1270,6 @@ class ForecastTab(QWidget):
         nmae = mae / hist_mean
         return max(0.0, min(100.0, 100.0 - nmae * 100.0))
 
-    # Causal accuracy ידועה מ-backtest: MAPE 14.9% → accuracy ~85%.
-    # זה מספר קבוע (לא בא מ-backtest-של-ריצה-זו), עד שהspecific ייכתב.
-    _CAUSAL_ACCURACY_FIXED = 85.0
-
     def _fill_fc_table(self, results):
         models = ['arima','prophet','xgboost','causal']
         dfs    = {m: results[m].set_index('year_month')
@@ -1270,15 +1283,14 @@ class ForecastTab(QWidget):
             months = results[anchor_model]['year_month'].tolist()
         prev   = int(self._series.values[-1]) if len(self._series) else 0
 
-        # חישוב accuracy: ARIMA/Prophet/XGBoost מ-backtest; Causal — קבוע
+        # Sprint C7.6: accuracy לכל המודלים מגיע מ-backtest (כולל causal,
+        # שעד C7.5 קיבל קבוע 85.0 מ-_CAUSAL_ACCURACY_FIXED שעכשיו הוסר).
         metrics = results.get('metrics') or {}
         hist_mean = float(self._series.mean()) if len(self._series) else 0.0
         model_accuracy: dict[str, float | None] = {}
-        for m in ('arima','prophet','xgboost'):
+        for m in ('arima','prophet','xgboost','causal'):
             mae = metrics.get(m, {}).get('mae') if isinstance(metrics, dict) else None
             model_accuracy[m] = self._accuracy_pct(mae, hist_mean)
-        if 'causal' in dfs:
-            model_accuracy['causal'] = self._CAUSAL_ACCURACY_FIXED
         valid_accs = [a for a in model_accuracy.values() if a is not None]
         # ממוצע משוקלל: Causal מקבל משקל 2 כי הוא הכי-מדויק
         if 'causal' in model_accuracy and model_accuracy['causal'] is not None:
@@ -1336,9 +1348,6 @@ class ForecastTab(QWidget):
                 self.fc_table.setItem(row, col, it)
             prev = avg
         self.fc_table.resizeColumnsToContents()
-
-        # שמירת ה-accuracy ל-legend (ייקרא ב-plot)
-        self._model_accuracy = model_accuracy
 
     def _fill_nv(self, nv):
         for k, lbl in self.nv_vals.items():

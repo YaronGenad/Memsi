@@ -167,6 +167,44 @@ and harmless if the tables already exist.
 > the `incremental_sync` (rolling last 30 days) runs, and finishes in
 > seconds.
 
+## Fresh install checklist
+
+Deploying to a brand-new machine takes more than "double-click the installer".
+The following items are not automated and will leave the app in a
+visibly-broken state if skipped:
+
+1. **Schema** — run `python migrate.py` against an empty DB. Idempotent;
+   safe to re-run.
+2. **Domain tables start empty by design.** `customers`, `pricing_tiers`,
+   `branches`, `warehouses`, `luggage_identification` have no seed
+   migration (migration 002 was retired in Sprint C7.3 when the legacy
+   `pricing_data.py` / `branch_names.py` / `warehouse_config.py` shims
+   were removed). Populate via the **Updates** tab, row by row. Plan
+   ~30 minutes for initial setup, or export from a working install's DB
+   and `pg_dump | psql` into the new one.
+3. **Nightly sync needs Python.** The PyInstaller bundle
+   (`PriorityInterface.exe`) is the GUI only. `nightly_sync.py` has no
+   `__main__` entry point in the spec, so users running from the bundle
+   still need a Python interpreter + the repo to schedule the nightly
+   job. On Windows, register:
+   ```
+   schtasks /create /TN MemsiNightlySync /SC DAILY /ST 23:00 ^
+       /TR "C:\path\to\python.exe C:\path\to\repo\nightly_sync.py" /F
+   ```
+4. **historical_features.csv ends at 2026-05.** The `weekly_cell`
+   forecast model uses [`data/historical_features.csv`](data/historical_features.csv)
+   as a context lookup table (anxiety / economy_open / flight_capacity /
+   consumer_spending / arriving_passengers per month). When the calendar
+   moves past the last row, the trainer forward-fills the last available
+   month — usually fine for routine periods, less accurate during
+   significant regime shifts. To extend, append rows manually to the
+   CSV with the same columns. There's no UI for this yet.
+5. **PostgreSQL 15+** required (see Dependencies). Ubuntu 22.04 ships
+   PG 14; install 15 from the PostgreSQL APT repo there.
+6. **pdfplumber** must be installed (it's in `requirements.txt`). If it's
+   missing, the app shows a QMessageBox at startup and IAA sync will
+   silently return zero rows.
+
 ## Dependencies
 
 **PostgreSQL 15+** required. Migration `009_per_cell_forecasts.sql` uses

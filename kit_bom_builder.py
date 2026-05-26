@@ -112,6 +112,7 @@ def fetch_all_luggage_parts() -> list[dict]:
     # שלב 3: לכל מועמד, שלח שאילתה ל-Priority
     all_parts: list[dict] = []
     tried_mparts = set()
+    from fetch_combined import odata_escape
     for mpart in sorted(candidate_mparts):
         if mpart in tried_mparts:
             continue
@@ -121,7 +122,7 @@ def fetch_all_luggage_parts() -> list[dict]:
                 f'{base_url}/LOGPART',
                 headers={'Authorization': auth},
                 params={
-                    '$filter': f"MPARTNAME eq '{mpart}'",
+                    '$filter': f"MPARTNAME eq '{odata_escape(mpart)}'",
                     '$select': 'PARTNAME,MPARTNAME,PARTDES,TOPP_SET',
                     '$top': 200,
                 },
