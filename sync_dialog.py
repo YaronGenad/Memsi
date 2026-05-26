@@ -288,10 +288,12 @@ class BigSyncDialog(_BaseSyncDialog):
 
     def __init__(self, parent):
         super().__init__(parent)
+        # Sprint C7.5: חייב להיות לפני שהworker מתחיל. ב-_on_ok של הבסיס
+        # יש QTimer.singleShot(2000, self.accept) שמתזמן סגירה אם
+        # _auto_close=True. עד C7.4 ניסינו לבטל את זה ב-_on_ok-הoverride
+        # *אחרי* super(), אבל אז ה-timer כבר תוזמן ו-BigSyncDialog
+        # נסגר אוטומטית כמו ה-Small. עכשיו מאפסים פה ומסירים את ה-override.
+        self._auto_close = False
         self.setModal(True)
         self.setMinimumSize(520, 420)
         self.title_lbl.setText("מעדכן מסד נתונים מעדכון אחרון, נא להמתין")
-
-    def _on_ok(self, pulled: dict):
-        super()._on_ok(pulled)
-        self._auto_close = False  # תן למשתמש לראות שהסתיים

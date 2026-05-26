@@ -117,14 +117,24 @@ def rebuild_local_inventory_from_partbal(lg: logging.Logger | None = None) -> di
 
     # שלב 4: כתיבה ל-DB
     rows = [(wh, sku, round(qty, 2)) for (wh, sku), qty in final.items()]
+
+    # Sprint C7.5: defensive guard. אם rows ריק, אסור TRUNCATE — אחרת
+    # נחנן את הטבלה לחלוטין עד הריצה הבאה. הסיבה האפשרית: PARTBAL מחזיר
+    # שורות, אבל כולן נופלות ב-eligible filter (e.g. סניפים יצאו זמנית
+    # מהחלון הרולינג של 12 חודשים).
+    if not rows:
+        lg.warning("local_inv (partbal): 0 rows to write — skipping TRUNCATE "
+                   "to preserve existing data")
+        duration = (datetime.now() - start).total_seconds()
+        return {'rows': 0, 'duration_seconds': round(duration, 1), 'skipped': True}
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("TRUNCATE local_inventory")
-            if rows:
-                execute_values(cur, """
-                    INSERT INTO local_inventory (warehouse_code, sku, quantity)
-                    VALUES %s
-                """, rows, page_size=1000)
+            execute_values(cur, """
+                INSERT INTO local_inventory (warehouse_code, sku, quantity)
+                VALUES %s
+            """, rows, page_size=1000)
 
     duration = (datetime.now() - start).total_seconds()
     lg.info("local_inv (partbal) rebuild done: %d rows, %.1fs", len(rows), duration)

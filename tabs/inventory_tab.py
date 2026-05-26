@@ -70,14 +70,17 @@ class InventoryWorker(QThread):
         warehouses = self.warehouse_filter or []
         with get_conn() as conn:
             if warehouses:
-                wh_list = ",".join(f"'{w}'" for w in warehouses)
-                q = f"""
+                # Sprint C7.5: parameterized query עם ANY(%s) במקום f-string
+                # interpolation. ה-warehouse codes באים מטבלת warehouses ב-DB
+                # ולכן הסיכון היה נמוך, אבל ה-pattern שבור.
+                q = """
                     SELECT li.warehouse_code AS "מחסן",
                            li.sku            AS "מקט",
                            li.quantity       AS "יתרה"
                     FROM local_inventory li
-                    WHERE li.warehouse_code IN ({wh_list})
+                    WHERE li.warehouse_code = ANY(%s)
                 """
+                df = pd.read_sql_query(q, conn, params=(list(warehouses),))
             else:
                 q = """
                     SELECT warehouse_code AS "מחסן",
@@ -85,7 +88,7 @@ class InventoryWorker(QThread):
                            quantity       AS "יתרה"
                     FROM local_inventory
                 """
-            df = pd.read_sql_query(q, conn)
+                df = pd.read_sql_query(q, conn)
             if df.empty:
                 return df
 
