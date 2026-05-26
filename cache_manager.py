@@ -197,3 +197,94 @@ class CacheManager:
                 """, (year_month,))
 
         logger.info("נתוני חודש %s נמחקו מה-cache", year_month)
+
+    def replace_month_atomic(self, year_month: str, documents: list,
+                             logfile_records: list,
+                             start_date: str, end_date: str) -> None:
+        """Sprint C7.7: clear+save+metadata בtransaction יחיד.
+
+        עד C7.6, nightly_sync.sync_priority_rolling היה קורא ל-
+        clear_month_data → save_documents → save_logfile → update_metadata
+        בארבע get_conn() נפרדים. ה-window בין clear ל-save הראשון יכל
+        להותיר חודש ריק אם ה-DB ירד בדיוק שם.
+
+        כאן הכל בקריאת `with get_conn()` יחידה — אם משהו בפנים זורק,
+        ה-context manager עושה rollback ושום שינוי לא נכתב.
+
+        logfile records מסוננים מ-NULL LOGDOCNO כמו ב-save_logfile.
+        """
+        # logfile: יוצרים rows ומסננים null LOGDOCNO
+        log_rows = []
+        log_skipped = 0
+        for log in (logfile_records or []):
+            logdocno = log.get('LOGDOCNO')
+            if logdocno is None or logdocno == '':
+                log_skipped += 1
+                continue
+            log_rows.append((
+                logdocno,
+                log.get('CURDATE'),
+                log.get('PARTNAME'),
+                log.get('TOPARTDES'),
+                log.get('TQUANT'),
+                log.get('UCOST'),
+                log.get('CUSTNAME'),
+            ))
+
+        # documents: יוצרים rows
+        doc_rows = [
+            (
+                doc.get('DOCNO'),
+                doc.get('CURDATE'),
+                doc.get('CUSTNAME'),
+                doc.get('CUSTDES'),
+                doc.get('CDES'),
+                doc.get('DETAILS'),
+                doc.get('STATDES'),
+                doc.get('OWNERLOGIN'),
+                doc.get('BRANCHNAME'),
+                doc.get('RETL_DETAILS1'),
+            )
+            for doc in (documents or [])
+        ]
+
+        with get_conn() as conn:
+            with conn.cursor() as cursor:
+                # 1. clear
+                cursor.execute("DELETE FROM documents WHERE TO_CHAR(curdate, 'YYYY-MM') = %s", (year_month,))
+                cursor.execute("DELETE FROM logfile   WHERE TO_CHAR(curdate, 'YYYY-MM') = %s", (year_month,))
+                cursor.execute("DELETE FROM cache_metadata WHERE year_month = %s", (year_month,))
+
+                # 2. save documents
+                if doc_rows:
+                    execute_values(cursor, """
+                        INSERT INTO documents (docno, curdate, custname, custdes, cdes, details,
+                                             statdes, ownerlogin, branchname, retl_details1)
+                        VALUES %s
+                        ON CONFLICT (docno) DO NOTHING
+                    """, doc_rows, page_size=500)
+
+                # 3. save logfile
+                if log_rows:
+                    execute_values(cursor, """
+                        INSERT INTO logfile (logdocno, curdate, partname, topartdes,
+                                            tquant, ucost, custname)
+                        VALUES %s
+                        ON CONFLICT (logdocno, partname, topartdes, tquant, ucost, curdate)
+                          WHERE logdocno IS NOT NULL
+                          DO NOTHING
+                    """, log_rows, page_size=500)
+
+                # 4. metadata: שתי שורות (documents + logfile)
+                for data_type, count in (('documents', len(doc_rows)),
+                                          ('logfile', len(log_rows))):
+                    cursor.execute("""
+                        INSERT INTO cache_metadata (data_type, year_month, start_date, end_date, record_count)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (data_type, year_month)
+                        DO UPDATE SET record_count = %s, fetched_at = NOW()
+                    """, (data_type, year_month, start_date, end_date, count, count))
+
+        if log_skipped:
+            logger.info("replace_month_atomic %s: skipped %d logfile rows with null LOGDOCNO",
+                        year_month, log_skipped)

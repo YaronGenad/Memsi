@@ -18,7 +18,7 @@ scenario_engine.py — ייצור תחזיות מותנות-תרחיש.
 """
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 import pandas as pd
 import numpy as np
@@ -78,7 +78,10 @@ def compute_conversion_rates(force_refresh: bool = False) -> dict[str, float]:
     מחשב (demand_8_branches / arriving_passengers × 100000) ולוקח median per regime.
     """
     global _conversion_cache, _conversion_cache_at
-    now = datetime.now()
+    # Sprint C7.7: UTC במקום local time. ה-cache invalidation אורך 3600s,
+    # ובמכונה עם שעון לא-UTC, השוואת naive datetime עם _conversion_cache_at
+    # יכלה להיות לא-מדויקת ב-DST transitions.
+    now = datetime.now(timezone.utc)
     if (not force_refresh and _conversion_cache and _conversion_cache_at
             and (now - _conversion_cache_at).total_seconds() < 3600):
         return dict(_conversion_cache)

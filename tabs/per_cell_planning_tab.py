@@ -26,6 +26,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtGui import QColor, QBrush
 
 from logger import logger
+from tabs._base import format_error_for_user
 from domain_repository import get_branch_name
 
 
@@ -329,7 +330,7 @@ class PerCellPlanningTab(QWidget):
     def _on_error(self, tb: str):
         self.compute_btn.setEnabled(True)
         self.status_label.setText("שגיאה")
-        QMessageBox.critical(self, "שגיאה", tb[:1000])
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
 
     def _fill_table(self, df):
         self.table.setSortingEnabled(False)

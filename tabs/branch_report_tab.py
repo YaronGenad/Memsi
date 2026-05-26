@@ -10,6 +10,7 @@ from qtpy.QtCore import Qt, QThread, Signal as pyqtSignal
 
 from fetch_combined import fetch_with_cache, combine_data
 from logger import logger
+from tabs._base import format_error_for_user
 
 
 class BranchLoadWorker(QThread):
@@ -199,7 +200,7 @@ class BranchReportTab(QWidget):
     def _on_load_error(self, tb):
         self.branch_hint.setText("שגיאה בטעינת נתונים")
         self.status_text.append(f"✗ שגיאה: {tb[:600]}")
-        QMessageBox.critical(self, "שגיאה", tb[:500])
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
         self.load_btn.setEnabled(True)
 
     def generate_report(self):
@@ -226,5 +227,5 @@ class BranchReportTab(QWidget):
 
     def _on_report_error(self, tb):
         self.status_text.append(f"\n✗ שגיאה:\n{tb[:800]}")
-        QMessageBox.critical(self, "שגיאה", tb[:500])
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
         self.run_btn.setEnabled(True)

@@ -144,7 +144,9 @@ def _translate_to_weekly_features(ctx: dict) -> dict:
 
 
 def backtest(series: pd.Series, events_df: pd.DataFrame, context: dict,
-             test_size: int = 6) -> dict[str, dict]:
+             test_size: int = 6,
+             branches: list | None = None,
+             categories: list | None = None) -> dict[str, dict]:
     """
     מאמן כל מודל על series[:-test_size] וחוזה את החלק האחרון.
     מחזיר dict: {model: {'mae': X, 'rmse': Y, 'mape': Z|None, 'test_n': N}}.
@@ -154,6 +156,11 @@ def backtest(series: pd.Series, events_df: pd.DataFrame, context: dict,
     התקופה ההיסטורית הנבחנת (חודשי test set). זה מבטיח שהמטריקות שמוצגות
     ל-UI ("דיוק 78%") חושבו תחת אותו state שהמודל יחזה איתו ב-production
     עבור תקופה דומה.
+
+    Sprint C7.7: branches/categories מועברים ל-weekly_cell דרך
+    `_selected_branches`/`_selected_categories` ב-period_context. עד C7.6
+    ה-backtest תמיד הריץ weekly_cell על "כל הסניפים" ולכן ה-MAE שהוצג
+    למשתמש לא תאם לסלייס שהוא בחר ב-UI.
     """
     if len(series) < test_size + 6:
         logger.info("backtest: series too short (%d < %d+6), skipping",
@@ -169,7 +176,15 @@ def backtest(series: pd.Series, events_df: pd.DataFrame, context: dict,
     if not period_context:
         # fallback: השתמש ב-context שהועבר (התנהגות קודמת). זה קורה רק
         # אם events_df ריק או חסר את החודשים — לא קורה ב-production.
-        period_context = context
+        period_context = dict(context) if context else {}
+
+    # Sprint C7.7: הזרקת ה-slice ל-period_context כדי ש-weekly_cell יתאמן
+    # על אותם branches/categories שה-UI מציג. שאר המודלים לא משתמשים
+    # במפתחות האלה ולכן זה no-op עבורם.
+    if branches:
+        period_context['_selected_branches'] = list(branches)
+    if categories:
+        period_context['_selected_categories'] = list(categories)
 
     metrics: dict[str, dict] = {}
 

@@ -114,6 +114,10 @@ def mark_historical_regimes_v2():
 
 
 if __name__ == '__main__':
+    # Sprint C7.7: config check לפני שמתחילים.
+    from config_check import assert_env_configured
+    assert_env_configured('PRIORITY_AUTH_HEADER', 'PRIORITY_BASE_URL')
+
     n_flights = load_flight_traffic()
     print(f"flight_traffic: {n_flights} months loaded")
     n_regimes = mark_historical_regimes_v2()

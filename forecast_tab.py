@@ -22,6 +22,7 @@ from forecast_db import ForecastDB
 from forecast_engine import run_all_models, forecast_arima, forecast_prophet, forecast_xgboost, newsvendor_order
 from domain_repository import get_display_label
 from logger import logger
+from tabs._base import format_error_for_user
 
 try:
     from bidi.algorithm import get_display as _bidi
@@ -128,7 +129,9 @@ class ForecastWorker(QThread):
                 from forecast_evaluation import backtest, save_run
                 self.progress.emit("מחשב אמינות מודלים על היסטוריה…")
                 metrics = backtest(self.series, self.events_df, self.context,
-                                   test_size=6)
+                                   test_size=6,
+                                   branches=self.branches,
+                                   categories=self.categories)
                 res['metrics'] = metrics
 
                 if self.persist:
@@ -1008,7 +1011,7 @@ class ForecastTab(QWidget):
     def _on_snap_error(self, tb):
         self.snap_btn.setEnabled(True)
         self.snap_status.setText("שגיאה")
-        QMessageBox.critical(self, "שגיאה", tb[:1000])
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
 
     def _fill_snap_hist_table(self, pivot: pd.DataFrame):
         months = list(pivot.columns)
@@ -1258,7 +1261,7 @@ class ForecastTab(QWidget):
         self.run_btn.setEnabled(True); self.proc_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.status_label.setText("שגיאה")
-        QMessageBox.critical(self, "שגיאה", tb[:1000])
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
 
     @staticmethod
     def _accuracy_pct(mae, hist_mean) -> float | None:

@@ -181,7 +181,22 @@ def forecast_causal(series: pd.Series, horizon: int,
        (לא פר-כל-9-סניפי-ליבה). 1.0 = כל-ה-core (ברירת-מחדל).
     """
     rates = _load_rates()
-    n = n_branches if n_branches is not None else len(CORE_BRANCHES)
+    # Sprint C7.7: n_branches דינמי במקום len(CORE_BRANCHES) קבוע. סניף
+    # שיצא מ-eligible_branches (פעילות נמוכה ב-12 חודשים אחרונים) לא נספר.
+    # כך התחזית מתאימה ל-pool הפעיל-בפועל. אם eligible_branches נכשל
+    # (אין DB / שגיאת ייבוא) — fallback ל-len(CORE_BRANCHES).
+    if n_branches is not None:
+        n = n_branches
+    else:
+        try:
+            from min_stock_calculator import eligible_branches
+            eligible = set(eligible_branches())
+            n = len([b for b in CORE_BRANCHES if b in eligible])
+            if n == 0:
+                # אם כל ה-core יצאו מ-eligible (מצב חריג) — נופלים ל-fallback.
+                n = len(CORE_BRANCHES)
+        except Exception:
+            n = len(CORE_BRANCHES)
     share = slice_share if slice_share is not None else 1.0
     ctx_regime = context.get('conversion_regime') if context else None
 
