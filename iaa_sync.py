@@ -212,13 +212,18 @@ def sync_one_month(year_month: str, pdf_url: str) -> dict:
                 """, (year_month, pdf_url, notes))
         return {'year_month': year_month, 'status': 'extraction_failed'}
 
-    # sanity range check לפני כתיבה. ערכי-קצה אמיתיים (כמו מרץ 2026 = 203K
-    # בגלל סגירת שמיים) צריכים להישמר אבל מסומנים, כדי שנדע שלא בטעות-פרסור.
+    # sanity range check לפני כתיבה. Sprint C7.4: הורדנו את ה-lower-bound
+    # מ-300K ל-100K, כי חודשי-מלחמה אמיתיים (כמו מרץ 2026 = 203K בגלל
+    # סגירת שמיים) נכנסו תחת 300K ונדחו מ-causal_forecast שמסנן notes='ok'.
+    # 100K עדיין מספיק כדי לזהות parse errors אמיתיים (חודש אזרחי לא יורד
+    # מתחת 100K גם בשיא מבצע).
     notes = 'ok'
     issues = []
-    if not (300_000 < metrics['total_passengers'] < 3_000_000):
+    if not (100_000 < metrics['total_passengers'] < 3_000_000):
         issues.append(f"total_passengers={metrics['total_passengers']} out of range")
-    if not (3_000 < metrics['total_flights'] < 25_000):
+    # ה-lower-bound של flights גם הורד (3000 → 1500) באותו רציונל: מרץ 2026
+    # היה 2720 טיסות בגלל סגירת-שמיים, וזה ערך אמיתי, לא parse error.
+    if not (1_500 < metrics['total_flights'] < 25_000):
         issues.append(f"total_flights={metrics['total_flights']} out of range")
     if issues:
         notes = '; '.join(issues)

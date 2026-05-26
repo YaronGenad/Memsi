@@ -56,7 +56,12 @@ _ROLL_WINS = [4, 8, 13]
 # ────────────────────────────────────────────────────────────────
 
 def _pull_daily_transactions() -> pd.DataFrame:
-    """מושך כל תיעודי-תיקון מ-DB. עמודות: day, branch, category."""
+    """מושך כל תיעודי-תיקון מ-DB. עמודות: day, branch, category.
+
+    Sprint C7.4: מסננים את החודש הנוכחי. החודש הנוכחי תמיד partial
+    (מסתיים בתאריך-של-היום), ומכניס bias לפיצ'רים שמחושבים פר-חודש
+    (lag13, roll4_mean וכו'). ה-pipeline של weekly_cell צריך חודשים
+    מלאים בלבד."""
     with get_conn() as conn:
         df = pd.read_sql_query("""
             SELECT lf.curdate::date AS day,
@@ -67,6 +72,7 @@ def _pull_daily_transactions() -> pd.DataFrame:
             INNER JOIN documents d ON lf.logdocno = d.docno
             WHERE d.statdes = 'סופית'
               AND lf.topartdes IS NOT NULL
+              AND lf.curdate < date_trunc('month', CURRENT_DATE)
         """, conn)
 
     df['branch'] = df['branch_raw'].fillna('').str.strip()

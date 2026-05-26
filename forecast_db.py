@@ -43,6 +43,11 @@ class ForecastDB:
     שמשתמשים ב-`with ForecastDB() as fdb:` ימשיכו לעבוד; הם פשוט no-op.
     """
 
+    # Sprint C7.4: class-level flag כדי שטעינת ה-events מה-CSV תרוץ פעם
+    # אחת בלבד פר-process. setup_tables נקראת מ-_load_controls בכל פתיחת
+    # tab התחזיות, ובעבר רצו 36 INSERTs מיותרים בכל פעם.
+    _csv_loaded = False
+
     def __init__(self):
         # אין יותר חיבור-לכל-החיים.
         pass
@@ -58,12 +63,14 @@ class ForecastDB:
         return None
 
     def setup_tables(self):
-        """יצירת טבלאות אם לא קיימות + טעינת אירועים מ-CSV"""
+        """יצירת טבלאות אם לא קיימות + טעינת אירועים מ-CSV (פעם אחת בלבד)."""
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(CREATE_FORECAST_HISTORY)
                 cur.execute(CREATE_FORECAST_EVENTS)
-        self._load_events_from_csv()
+        if not ForecastDB._csv_loaded:
+            self._load_events_from_csv()
+            ForecastDB._csv_loaded = True
 
     def _load_events_from_csv(self):
         """טוען forecast_events.csv לטבלה — מדלג על שורות קיימות"""

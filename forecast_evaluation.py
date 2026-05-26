@@ -48,12 +48,104 @@ def _mape(actual: np.ndarray, predicted: np.ndarray) -> float | None:
 # ────────────────────────────────────────────────
 #  Backtest
 # ────────────────────────────────────────────────
+def _context_for_period(events_df: pd.DataFrame, year_months: list[str]) -> dict:
+    """בונה context dict שמייצג את התקופה ההיסטורית של ה-test set.
+
+    Sprint C7.4: עד עכשיו ה-backtest קיבל את ה-context הנוכחי מה-UI
+    (למשל is_ceasefire=True) ואז העריך מודלים על חודשים היסטוריים שהיו
+    is_war=True. ה-MAE שמוצג למשתמש לא שיקף איך המודל יחזה את ה-truth
+    האמיתי בתקופה הזאת.
+
+    התיקון: לבנות context מתוך events_df עצמו עבור החודשים בtest set.
+    flags בינאריים (is_war וכו') מקבלים 1 אם ROW כלשהו בתקופה הוא 1
+    (dominant). travel_impact + conversion_regime לוקחים את הערך
+    הכי שכיח.
+
+    המודלים מצפים לפלט context יחיד פר-ריצה — אז זה ה-best-of-period
+    representation. עדיין לא per-prediction-month, אבל הרבה יותר נכון
+    מ-current-UI-state.
+    """
+    if events_df is None or events_df.empty or not year_months:
+        return {}
+    sub = events_df[events_df['year_month'].isin(year_months)]
+    if sub.empty:
+        return {}
+
+    ctx: dict = {}
+    for binary_col in ('is_war', 'is_military_op', 'is_ceasefire',
+                       'is_summer_peak'):
+        if binary_col in sub.columns:
+            ctx[binary_col] = int((sub[binary_col].fillna(0) > 0).any())
+
+    if 'jewish_holiday' in sub.columns:
+        # jewish_holiday ב-DB הוא 0/1/2 (none/passover/highh). לוקחים max.
+        ctx['jewish_holiday'] = int(sub['jewish_holiday'].fillna(0).max())
+
+    ctx['is_black_friday'] = int(any(ym.endswith('-11') for ym in year_months))
+    ctx['is_routine'] = int(not (ctx.get('is_war') or
+                                  ctx.get('is_military_op') or
+                                  ctx.get('is_ceasefire')))
+
+    if 'travel_impact' in sub.columns and sub['travel_impact'].notna().any():
+        ctx['travel_impact'] = sub['travel_impact'].mode().iloc[0]
+    else:
+        ctx['travel_impact'] = (
+            'very_low' if ctx.get('is_war') else
+            'low'      if ctx.get('is_military_op') else
+            'high'     if (ctx.get('is_summer_peak') or ctx.get('jewish_holiday')) else 'normal')
+
+    # Sprint C5.1 features (anxiety/economy_open/flight_capacity/...) —
+    # אותו mapping שיש ב-forecast_tab._translate_context_to_features.
+    # משוכפל כאן בכוונה כדי לא לייבא Qt מ-forecast_tab.py.
+    ctx.update(_translate_to_weekly_features(ctx))
+    return ctx
+
+
+def _translate_to_weekly_features(ctx: dict) -> dict:
+    is_war = ctx.get('is_war', 0)
+    is_op = ctx.get('is_military_op', 0)
+    is_cease = ctx.get('is_ceasefire', 0)
+    is_holiday = ctx.get('jewish_holiday', 0)
+    is_summer = ctx.get('is_summer_peak', 0)
+
+    if is_war and is_op:
+        anxiety, economy, flight, spend, passengers = 10, 2, 2, 2, 200_000
+    elif is_war:
+        anxiety, economy, flight, spend, passengers = 8, 5, 4, 4, 400_000
+    elif is_op:
+        anxiety, economy, flight, spend, passengers = 6, 7, 7, 6, 500_000
+    elif is_cease:
+        anxiety, economy, flight, spend, passengers = 3, 9, 9, 10, 800_000
+    else:
+        anxiety, economy, flight, spend, passengers = 3, 10, 10, 8, 700_000
+
+    if is_holiday:
+        spend = min(10, spend + 2)
+    if is_summer:
+        flight = min(10, flight + 1)
+        spend = min(10, spend + 2)
+        passengers = int(passengers * 1.5)
+
+    return {
+        'anxiety': anxiety,
+        'economy_open': economy,
+        'flight_capacity': flight,
+        'consumer_spending': spend,
+        'arriving_passengers': passengers,
+    }
+
+
 def backtest(series: pd.Series, events_df: pd.DataFrame, context: dict,
              test_size: int = 6) -> dict[str, dict]:
     """
     מאמן כל מודל על series[:-test_size] וחוזה את החלק האחרון.
     מחזיר dict: {model: {'mae': X, 'rmse': Y, 'mape': Z|None, 'test_n': N}}.
     אם הסדרה קצרה מדי - מחזיר dict ריק (אין מספיק נתונים).
+
+    Sprint C7.4: ה-context הנכנס מתעלמים ממנו לטובת context שמשקף את
+    התקופה ההיסטורית הנבחנת (חודשי test set). זה מבטיח שהמטריקות שמוצגות
+    ל-UI ("דיוק 78%") חושבו תחת אותו state שהמודל יחזה איתו ב-production
+    עבור תקופה דומה.
     """
     if len(series) < test_size + 6:
         logger.info("backtest: series too short (%d < %d+6), skipping",
@@ -61,12 +153,21 @@ def backtest(series: pd.Series, events_df: pd.DataFrame, context: dict,
         return {}
 
     train = series.iloc[:-test_size]
+    test_yms = list(series.index[-test_size:])
     actual = series.iloc[-test_size:].values.astype(float)
+
+    # Sprint C7.4: context מ-events_df במקום ה-snapshot של ה-UI.
+    period_context = _context_for_period(events_df, test_yms)
+    if not period_context:
+        # fallback: השתמש ב-context שהועבר (התנהגות קודמת). זה קורה רק
+        # אם events_df ריק או חסר את החודשים — לא קורה ב-production.
+        period_context = context
+
     metrics: dict[str, dict] = {}
 
     for name, fn in _MODEL_FNS.items():
         try:
-            df = fn(train, test_size, events_df, context)
+            df = fn(train, test_size, events_df, period_context)
             pred = df['forecast'].values.astype(float)[:test_size]
             metrics[name] = {
                 'test_n': int(test_size),

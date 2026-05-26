@@ -49,3 +49,8 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+; Sprint C7.4: ה-.env מכיל credentials לסביבת-ייצור. מבטיחים שהוא נמחק
+; ב-uninstall כדי שלא יישאר על הדיסק אחרי הסרת התקנה.
+[UninstallDelete]
+Type: files; Name: "{app}\.env"

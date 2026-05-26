@@ -240,14 +240,6 @@ def _infer_season(ym: str) -> int:
     return 4                             # סתיו
 
 
-def _travel_impact_num(val) -> float:
-    mapping = {
-        'collapse': -2.0, 'very_low': -1.5, 'low': -0.5,
-        'recovering': 0.3, 'normal': 1.0, 'high': 1.5,
-    }
-    return mapping.get(str(val), 1.0)
-
-
 def _future_months(last_ym: str, horizon: int) -> list[str]:
     cur = datetime.strptime(last_ym + "-01", "%Y-%m-%d")
     months = []
@@ -381,49 +373,6 @@ XGBOOST_DESCRIPTION = (
     " ומחשב תחזית = rate × טיסות צפויות. הגיוני: יותר טיסות → יותר ביקוש."
     " Sandbox: MAE=280."
 )
-
-def _build_features(series: pd.Series, events_df: pd.DataFrame) -> pd.DataFrame:
-    ev = events_df.drop_duplicates(subset='year_month', keep='last').set_index('year_month')
-    rows = []
-    yms  = list(series.index)
-    for i, ym in enumerate(yms):
-        y, m    = int(ym[:4]), int(ym[5:7])
-        ev_row  = ev.loc[ym] if ym in ev.index else pd.Series(dtype=float)
-        # הערה (Sprint C1): month/quarter/is_summer_peak/is_routine הוסרו.
-        # sin_month/cos_month מקודדים עונתיות חודשית באופן רציף.
-        # is_summer_peak (Jul/Aug) חופף עם sin/cos. is_routine היה
-        # collinear עם is_war/military_op/ceasefire.
-        # Sprint C2.5: flight_volume_lag1 = נחיתות חודש קודם, מנורמללות לבייסליין.
-        # הטענה הסיבתית: ביקוש לתיקונים בחודש N מונע מנחיתות בחודש N-1 (lag
-        # של 2-4 שבועות בין נחיתה לתיקון). conversion_regime מקודד את הרגישות.
-        prev_ym = yms[i-1] if i > 0 else ym
-        flight_lag1 = _flight_volume_for(prev_ym)
-        flight_curr = _flight_volume_for(ym)
-        regime_num  = _regime_for(ym)
-
-        row = {
-            'sin_month':      np.sin(2 * np.pi * m / 12),
-            'cos_month':      np.cos(2 * np.pi * m / 12),
-            'is_war':          float(ev_row.get('is_war', 0)),
-            'is_military_op':  float(ev_row.get('is_military_op', 0)),
-            'is_ceasefire':    float(ev_row.get('is_ceasefire', 0)),
-            'jewish_holiday':  float(ev_row.get('jewish_holiday', 0)),
-            'travel_num':      _travel_impact_num(ev_row.get('travel_impact','normal')),
-            'is_black_friday': float(1 if m == 11 else 0),
-            'lag1':           float(series.iloc[i-1]) if i > 0 else 0,
-            'lag2':           float(series.iloc[i-2]) if i > 1 else 0,
-            'lag3':           float(series.iloc[i-3]) if i > 2 else 0,
-            'lag12':          float(series.iloc[i-12]) if i >= 12 else float(np.mean(series.values)),
-            'roll3_mean':     float(np.mean(series.values[max(0,i-3):i])) if i > 0 else 0,
-            'roll6_mean':     float(np.mean(series.values[max(0,i-6):i])) if i > 0 else 0,
-            'flight_lag1':    flight_lag1,
-            'flight_curr':    flight_curr,
-            'regime':         regime_num,
-            'target':         float(series.iloc[i]),
-        }
-        rows.append(row)
-    return pd.DataFrame(rows)
-
 
 def forecast_xgboost(series: pd.Series, horizon: int,
                      events_df: pd.DataFrame, context: dict) -> pd.DataFrame:
