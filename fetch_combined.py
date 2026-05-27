@@ -177,13 +177,22 @@ def fetch_with_cache(start_date, end_date, progress=None):
     return documents, logfile
 
 def combine_data(documents, logfile_records):
+    # Sprint C7.10: עמודת 'שם לקוח' באה מ-customers table (Priority OData
+    # לא מחזיר CUSTDES — אומת ב-probe ב-B1, ראה הערה ב-_DOCUMENTS_SELECT).
+    # עד עכשיו d.get('CUSTDES') החזיר None silently → עמודה תמיד ריקה
+    # ב-5 הדוחות שמשתמשים ב-combine_data.
+    # הvariable name_map הוא reference ל-dict שמוחזק ב-_cached, אז O(1)
+    # פר-lookup ולא DB roundtrip פר-document.
+    from domain_repository import _cached, _load_customer_name_map
+    name_map = _cached('customer_name_map', _load_customer_name_map)
+
     # המרה ל-DataFrame
     docs_df = pd.DataFrame([{
         'תעודה': d.get('DOCNO'),
         'תאריך': d.get('CURDATE'),
         'הערה 1 לכתיבה': d.get('RETL_DETAILS1'),
         'מספר לקוח': d.get('CUSTNAME'),
-        'שם לקוח': d.get('CUSTDES'),
+        'שם לקוח': name_map.get(str(d.get('CUSTNAME') or '').strip()),
         'שם לקוח קופה': d.get('CDES'),
         'פרטים': d.get('DETAILS'),
         'סטטוס': d.get('STATDES'),
