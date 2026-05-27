@@ -186,6 +186,19 @@ def backtest(series: pd.Series, events_df: pd.DataFrame, context: dict,
     if categories:
         period_context['_selected_categories'] = list(categories)
 
+    # Sprint C7.9: גם causal צריך slice_share כדי שה-MAE ב-backtest יתאם
+    # לסלייס שה-UI מציג. עד C7.8, causal ב-backtest רץ עם share=1.0 (כל
+    # ה-core) ולכן ה-MAE שהוצג היה למלוא 9 הסניפים, לא לסלייס הנבחר.
+    if branches or categories:
+        try:
+            from causal_forecast import compute_slice_share
+            share = compute_slice_share(branches, categories)
+            if share is not None:
+                period_context['_causal_slice_share'] = share
+        except Exception:
+            logger.exception("backtest: compute_slice_share failed; "
+                             "causal stays on full-core")
+
     metrics: dict[str, dict] = {}
 
     for name, fn in _MODEL_FNS.items():
@@ -240,10 +253,16 @@ def save_run(branches: list[str], categories: list[str],
         run_id = cur.fetchone()[0]
 
         # predictions — bulk insert עם execute_values
+        # Sprint C7.9: כל מודל ש-results מכיל DataFrame עבורו (גם causal,
+        # gold weekly_cell) נשמר. עד C7.8 רק 3 מודלים סטטיסטיים נשמרו, אז
+        # ה-UI הציג metrics ל-causal/weekly_cell אבל ה-predictions עצמן
+        # לא תועדו ב-DB.
         pred_rows = []
-        for model_name in ('arima', 'prophet', 'xgboost'):
-            df = results.get(model_name)
-            if df is None or df.empty:
+        for model_name, df in results.items():
+            # דילוג על non-DataFrame entries (newsvendor, descriptions, metrics, ...)
+            if not isinstance(df, pd.DataFrame) or df.empty:
+                continue
+            if 'year_month' not in df.columns or 'forecast' not in df.columns:
                 continue
             for _, row in df.iterrows():
                 pred_rows.append((
@@ -255,8 +274,10 @@ def save_run(branches: list[str], categories: list[str],
                 ))
 
         # 'avg' (ממוצע 3 המודלים) לצרכי השוואה אחר כך
+        # Sprint C7.9: results[m] יכול להיות None אם המודל נפל ב-_run_model.
+        # ה-guard המקורי בדק `m in results` בלבד וקרס על None.empty.
         models_with_data = [m for m in ('arima', 'prophet', 'xgboost')
-                            if m in results and not results[m].empty]
+                            if results.get(m) is not None and not results[m].empty]
         if len(models_with_data) >= 2:
             base = results[models_with_data[0]]
             avg_forecast = sum(results[m]['forecast'].values

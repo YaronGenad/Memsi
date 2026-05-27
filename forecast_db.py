@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from psycopg2.extras import execute_values
 from db_config import get_conn
+from logger import logger
 
 EVENTS_CSV = os.path.join(os.path.dirname(__file__), 'forecast_events.csv')
 
@@ -243,8 +244,36 @@ class ForecastDB:
         set_clause = ", ".join(f"{k} = %s" for k in data)
         with get_conn() as conn:
             with conn.cursor() as cur:
+                # Sprint C7.9: שולפים old_values לפני update לטובת audit log.
+                # שינויים ב-forecast_events משפיעים על כל התחזיות העתידיות —
+                # ראוי לעקוב אחרי מי שינה ומה.
+                cur.execute(
+                    "SELECT * FROM forecast_events WHERE year_month = %s",
+                    (year_month,)
+                )
+                old_row = cur.fetchone()
+                old_values = None
+                if old_row:
+                    col_names = [d[0] for d in cur.description]
+                    old_values = dict(zip(col_names, old_row))
+                    # מחלץ רק את השדות שעומדים להשתנות, כדי שה-audit לא יהיה ענק
+                    old_values = {k: old_values.get(k) for k in data}
+
                 cur.execute(f"""
                     INSERT INTO forecast_events (year_month, {', '.join(data.keys())})
                     VALUES (%s, {', '.join(['%s'] * len(data))})
                     ON CONFLICT (year_month) DO UPDATE SET {set_clause}
                 """, [year_month] + list(data.values()) + list(data.values()))
+
+                try:
+                    from domain_repository import _audit, get_current_user
+                    _audit(
+                        cur, 'forecast_events',
+                        'UPDATE' if old_row else 'INSERT',
+                        {'year_month': year_month},
+                        old_values, dict(data),
+                        get_current_user()
+                    )
+                except Exception:
+                    logger.exception("forecast_events upsert: audit failed "
+                                     "(non-fatal)")

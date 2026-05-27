@@ -17,6 +17,7 @@ overrides ידניים לאירועים לא-יהודיים כמו מלחמה).
 from __future__ import annotations
 from datetime import date
 from pyluach import dates
+from pyluach.hebrewcal import Year
 
 
 # חגים מרכזיים: (חודש-עברי, יום-תחילה, אורך-בימים). הימים נמשכים מ-eve-1 ועד
@@ -47,16 +48,26 @@ def get_jewish_holiday_months(year_from: int, year_to: int) -> set[str]:
     hy_start = year_from + 3760 - 1
     hy_end   = year_to + 3761
     for hy in range(hy_start, hy_end + 1):
+        # Sprint C7.9: leap-year detection דרך API מפורש של pyluach
+        # (`Year.leap`) במקום הסתמכות על exception מ-HebrewDate(hy,13,1).
+        # ה-pattern הקודם נכשל בשנה לא-מעוברת: HebrewDate(hy, 13, 1) זרק
+        # ValueError, ה-try ב-`continue` דילג על Purim כליל. תוצאה: Purim
+        # מרץ 2025 (5785, לא-מעוברת) חסר מ-forecast_events ב-DB.
+        try:
+            is_leap = Year(hy).leap
+        except Exception:
+            is_leap = False
         for _name, hm, hd, length in _MAJOR_HOLIDAYS:
             try:
-                # שנה מעוברת: Purim בפועל בחודש Adar II (13)
-                if hm == 12 and dates.HebrewDate(hy, 13, 1).month == 13:
+                # Purim: בשנה מעוברת חל ב-Adar II (חודש 13); בשנה לא-מעוברת
+                # חל ב-Adar (חודש 12). שאר החגים בחודשים 1-11 — לא מושפעים.
+                if hm == 12 and is_leap:
                     use_hm = 13
                 else:
                     use_hm = hm
                 start_h = dates.HebrewDate(hy, use_hm, hd)
             except (ValueError, KeyError):
-                # אם החודש לא קיים בשנה הזאת (אדר ב' רק במעוברת), דלג.
+                # safety net — לא אמור להגיע לכאן עם ה-leap detection הנכון.
                 continue
             for offset in range(length):
                 d = start_h + offset
