@@ -5,7 +5,10 @@
 ; and to contain the bundled app + .env with the production DB credentials.
 
 #define MyAppName "Memsi Interface"
-#define MyAppVersion "0.13.5"
+; Sprint C7.10: ה-version נשאר outdated על "0.13.5" במשך 8 sprints
+; (0.13.5 → 0.16.11). Windows Installer זיהה את הinstaller כ-same-version
+; ולא כ-upgrade. לעדכן בכל release (TODO: סקריפט פרה-build שקורא `git describe`).
+#define MyAppVersion "0.16.11"
 #define MyAppPublisher "Newcinema"
 #define MyAppExeName "PriorityInterface.exe"
 

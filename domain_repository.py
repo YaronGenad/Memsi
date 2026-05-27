@@ -125,6 +125,40 @@ def _load_customer_tier_map() -> dict[str, str]:
         return {code: tier for code, tier in cur.fetchall()}
 
 
+def get_customer_name(code: str | None) -> str | None:
+    """מחזיר שם-לקוח לפי קוד. None אם הקוד ריק/לא בטבלת customers/
+    name=NULL.
+
+    Sprint C7.10: עד עכשיו ה-Excel report ניסה לשלוף 'שם לקוח' מ-
+    OData CUSTDES שלא קיים → עמודה תמיד ריקה. עכשיו lookup מטבלת
+    customers (שמתעדכנת דרך SQL/migration; אין UI mutation path
+    ב-domain_repository, אז ה-cache לא צריך invalidate). Cache-backed;
+    טעינה אחת לסשן."""
+    if not code:
+        return None
+    mapping = _cached('customer_name_map', _load_customer_name_map)
+    return mapping.get(str(code).strip())
+
+
+def _load_customer_name_map() -> dict[str, str]:
+    """מפת {code: display_name} של לקוחות.
+
+    עדיפות: name (אם הוזן ידנית) → pricing_tier (תמיד קיים).
+    Sprint C7.10: עמודת `customers.name` ב-DB ריקה כרגע (20 שורות, כולן
+    NULL). pricing_tier (ELAL/AIR_FRANCE_KLM/DELTA/...) הוא ה-airline
+    label שמייצג את הלקוח. עד שמישהו ימלא ידנית את `name`, ה-tier
+    משמש כ-fallback סביר ב-UI במקום עמודה ריקה.
+    inactive customers גם נכללים כי דוחות ישנים יכולים להציג מסמכים
+    שלהם."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT code, COALESCE(NULLIF(name, ''), pricing_tier) "
+            "FROM customers "
+            "WHERE pricing_tier IS NOT NULL"
+        )
+        return {str(code): display for code, display in cur.fetchall()}
+
+
 def list_customers() -> list[dict]:
     """מחזיר את כל הלקוחות עם ה-tier."""
     with get_conn() as conn:
