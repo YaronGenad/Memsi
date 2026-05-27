@@ -28,7 +28,12 @@ class HealthCheckWorker(QThread):
             import os, requests
             from pathlib import Path
             from dotenv import load_dotenv
-            load_dotenv(Path(__file__).parent / '.env')
+            # Sprint C7.9: שימוש ב-_find_env_file כדי לתמוך גם ב-PyInstaller
+            # bundle (שם __file__.parent = _MEIPASS, אבל .env ליד ה-EXE).
+            from db_config import _find_env_file
+            _env = _find_env_file('.env')
+            if _env:
+                load_dotenv(_env)
             base = os.environ.get('PRIORITY_BASE_URL',
                                   'https://priority.newcinema.co.il/odata/Priority/tabula.ini/ncinema')
             auth = os.environ.get('PRIORITY_AUTH_HEADER', '')
@@ -141,6 +146,25 @@ class MainWindow(QMainWindow):
                 "החבילה pdfplumber לא מותקנת.\n"
                 "סנכרון נחיתות-נתב\"ג (IAA) לא יחלץ נתונים חדשים.\n\n"
                 "תיקון: pip install pdfplumber",
+            )
+
+        # Sprint C7.9: בדיקת env vars נדרשים ל-Priority. בלי זה, ה-GUI
+        # יטען (DB checks עוברים על local DB), אבל ה-sync יקרוס מאוחר
+        # יותר עם KeyError ב-os.environ['PRIORITY_AUTH_HEADER']. עדיף
+        # warning ב-startup מאשר crash עמוק בthread.
+        import os as _os
+        missing_env = [k for k in ('PRIORITY_AUTH_HEADER', 'PRIORITY_BASE_URL')
+                       if not _os.environ.get(k)]
+        if missing_env:
+            logger.warning("missing env vars: %s", missing_env)
+            from qtpy.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "תצורה חסרה",
+                "ה-.env לא כולל את המשתנים הבאים:\n  - "
+                + "\n  - ".join(missing_env)
+                + "\n\nסנכרון Priority לא יעבוד עד שייתוקן.\n"
+                  "ראה .env.example לפרטים.",
             )
         try:
             from db_config import get_conn

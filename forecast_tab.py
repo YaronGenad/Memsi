@@ -1624,8 +1624,10 @@ class ForecastTab(QWidget):
             self.scen_status.setText("שגיאה בחישוב — עיין ב-log")
 
     # ── Tab 8: תחזית פר-תא ────────────────────────────────
-    # 9 סניפי-ליבה (מתואם ל-causal_forecast.CORE_BRANCHES).
-    BASELINE_BRANCHES_C2 = ['05', '07', '23', '310', '325', '331', '332', '346', '800']
+    # Sprint C7.9: source-of-truth יחיד ב-causal_forecast.CORE_BRANCHES
+    # במקום שכפול. שמירה על ה-attribute לתאימות-לאחור.
+    from causal_forecast import CORE_BRANCHES as _CORE_BRANCHES_REF
+    BASELINE_BRANCHES_C2 = list(_CORE_BRANCHES_REF)
 
     def _build_tab_per_cell(self):
         """תחזית פר-(branch, cell) עם graceful degradation.

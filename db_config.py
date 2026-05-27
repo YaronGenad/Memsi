@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
+import sys
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -9,12 +10,30 @@ from psycopg2 import pool as _pool
 
 from logger import logger
 
+
+def _find_env_file(name: str) -> Path | None:
+    """Sprint C7.9: מחפש .env גם ב-PyInstaller bundle.
+    ב-dev mode: __file__.parent הוא תיקיית הפרויקט.
+    ב-bundle frozen: __file__.parent הוא _MEIPASS (תיקייה זמנית של
+    PyInstaller), אבל ה-.env שהinstaller שם נמצא ליד ה-EXE.
+    סדר חיפוש: dev-path קודם, אחר-כך bundle-path."""
+    candidates = [Path(__file__).parent / name]
+    if getattr(sys, 'frozen', False):
+        # PyInstaller bundle: .env נמצא ליד ה-EXE.
+        candidates.append(Path(sys.executable).parent / name)
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
 # טוען .env.local קודם (לעדיפות מקומית), נופל ל-.env לתאימות לאחור
-_HERE = Path(__file__).parent
-if (_HERE / '.env.local').exists():
-    load_dotenv(_HERE / '.env.local')
-else:
-    load_dotenv(_HERE / '.env')
+_local = _find_env_file('.env.local')
+_main = _find_env_file('.env')
+if _local:
+    load_dotenv(_local)
+elif _main:
+    load_dotenv(_main)
 
 
 def _build_db_config() -> dict:

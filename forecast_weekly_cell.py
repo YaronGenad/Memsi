@@ -78,7 +78,11 @@ def _pull_daily_transactions() -> pd.DataFrame:
     df['branch'] = df['branch_raw'].fillna('').str.strip()
     df.loc[df['branch'] == '', 'branch'] = df['doc_details'].fillna('').str.strip()
     df = df[df['branch'].str.len() > 0]
-    df['category'] = df['description'].apply(identify_luggage)
+    # Sprint C7.9: lookup unique-descriptions פעם אחת במקום .apply פר-שורה.
+    # 100K+ שורות × ~500 ייחודיות = חיסכון משמעותי בtraining time.
+    unique_descs = df['description'].dropna().unique()
+    lut = {d: identify_luggage(d) for d in unique_descs}
+    df['category'] = df['description'].map(lut)
     df = df.dropna(subset=['category'])
     df = df[df['category'] != '']
     df['day'] = pd.to_datetime(df['day'])

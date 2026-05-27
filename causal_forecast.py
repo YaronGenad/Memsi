@@ -95,7 +95,14 @@ def _regime_for_month(ym: str, context_regime: str | None = None) -> str:
     1. context_regime — אם המשתמש בחר ידנית.
     2. forecast_events.conversion_regime — אם תויג.
     3. LOW כברירת-מחדל לעתיד.
+
+    Sprint C7.9: ROUTINE מתואם ל-LOW. ב-UI הם נפרדים (ROUTINE=pre-war
+    שגרה רגילה, LOW=post-trauma) כי flight_capacity שונה לחיזוי, אבל
+    breakage_rate שווה ~50/100K. בלי המיפוי הזה, ROUTINE היה נופל לDB
+    lookup ואז ל-default 'LOW' silently — והמשתמש לא היה יודע.
     """
+    if context_regime == 'ROUTINE':
+        return 'LOW'
     if context_regime in ('HIGH', 'MEDIUM', 'LOW'):
         return context_regime
 
@@ -179,7 +186,14 @@ def forecast_causal(series: pd.Series, horizon: int,
     n_branches: כמות סניפים. None = ברירת-מחדל = 9 (core).
     slice_share: float in (0,1]. אם סופק, המודל מחזיר תחזית פר-הסלייס
        (לא פר-כל-9-סניפי-ליבה). 1.0 = כל-ה-core (ברירת-מחדל).
+
+    Sprint C7.9: אם slice_share=None אבל context['_causal_slice_share']
+    קיים — משתמשים בו. זה מאפשר ל-backtest להעביר slice דרך context-בלבד,
+    בלי לשנות את ה-_MODEL_FNS signature הסטנדרטית.
     """
+    if slice_share is None and context:
+        slice_share = context.get('_causal_slice_share')
+
     rates = _load_rates()
     # Sprint C7.7: n_branches דינמי במקום len(CORE_BRANCHES) קבוע. סניף
     # שיצא מ-eligible_branches (פעילות נמוכה ב-12 חודשים אחרונים) לא נספר.
