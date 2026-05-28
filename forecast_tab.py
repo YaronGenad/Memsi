@@ -1682,6 +1682,19 @@ class ForecastTab(QWidget):
         )
         self.pc_run_btn.clicked.connect(self._run_per_cell)
         controls.addWidget(self.pc_run_btn)
+
+        # Sprint C7.11: ייצוא לאקסל. enabled רק אחרי שיש תוצאות.
+        self.pc_export_btn = QPushButton("ייצא לאקסל")
+        self.pc_export_btn.setStyleSheet(
+            "QPushButton{background:#27ae60;color:white;padding:6px 14px;"
+            "border-radius:4px;font-weight:bold;}"
+            "QPushButton:hover{background:#1e8449;}"
+            "QPushButton:disabled{background:#bdc3c7;}"
+        )
+        self.pc_export_btn.setEnabled(False)
+        self.pc_export_btn.clicked.connect(self._export_per_cell)
+        controls.addWidget(self.pc_export_btn)
+
         controls.addStretch()
         v.addLayout(controls)
 
@@ -1755,6 +1768,8 @@ class ForecastTab(QWidget):
     def _on_per_cell_done(self, result: dict):
         self.pc_progress.setVisible(False)
         self.pc_run_btn.setEnabled(True)
+        # Sprint C7.11: שומרים את ה-result לייצוא לאקסל.
+        self._pc_last_result = result
 
         cells = result.get('cells', {})
         n = result.get('n_cells_processed', 0)
@@ -1811,8 +1826,89 @@ class ForecastTab(QWidget):
         finally:
             self.pc_table.setUpdatesEnabled(True)
         self.pc_table.resizeColumnsToContents()
+        # Sprint C7.11: מאפשרים ייצוא אחרי שיש תוצאות לטבלה.
+        self.pc_export_btn.setEnabled(True)
 
     def _on_per_cell_error(self, tb: str):
         self.pc_progress.setVisible(False)
         self.pc_run_btn.setEnabled(True)
-        self.pc_status.setText(f"שגיאה: {tb[:300]}")
+        self.pc_status.setText(f"שגיאה: {format_error_for_user(tb)}")
+
+    def _export_per_cell(self):
+        """Sprint C7.11: ייצוא תחזית פר-תא לאקסל.
+
+        קובץ עם 2 sheets:
+          * תחזיות פר-תא — שורה לכל (סניף, קטגוריה) עם n_obs, רמה, champion,
+            MAE, ועמודות לכל חודש-עתידי בהורייזון.
+          * סיכום חודשי — agg של תחזיות על-פני כל ה-cells פר חודש.
+        """
+        from qtpy.QtWidgets import QFileDialog, QMessageBox
+        from datetime import datetime
+
+        result = getattr(self, '_pc_last_result', None)
+        if not result or not result.get('cells'):
+            QMessageBox.warning(self, "אין נתונים",
+                                "אין תוצאות-תחזית לייצא. הרץ קודם.")
+            return
+
+        cells = result['cells']
+        agg = result.get('aggregate', {})
+        future_months = sorted(agg.keys())
+
+        # בניית DataFrame ראשי (אותה מבנה כמו pc_table)
+        rows = []
+        for (branch, cell) in sorted(cells.keys()):
+            cf = cells[(branch, cell)]
+            row = {
+                'סניף': branch,
+                'קטגוריה': cell,
+                'n_obs': cf.n_obs,
+                'רמה': cf.fallback_level,
+                'champion': cf.champion or '—',
+            }
+            if cf.metrics and cf.champion in cf.metrics:
+                mae = cf.metrics[cf.champion].get('mae')
+                row['MAE'] = round(mae, 1) if mae is not None else None
+            else:
+                row['MAE'] = None
+            champ_df = cf.forecasts.get(cf.champion) if cf.champion else None
+            champ_map = {}
+            if champ_df is not None:
+                for _, r in champ_df.iterrows():
+                    champ_map[r['year_month']] = int(r['forecast'])
+            for ym in future_months:
+                row[ym] = champ_map.get(ym, None)
+            rows.append(row)
+
+        forecasts_df = pd.DataFrame(rows)
+
+        # סיכום חודשי
+        summary_df = pd.DataFrame([
+            {'חודש': ym, 'סך תחזיות': int(round(agg[ym]))}
+            for ym in future_months
+        ])
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default = f"per_cell_forecast_{ts}.xlsx"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "שמירה כאקסל", default, "Excel (*.xlsx)"
+        )
+        if not path:
+            return
+
+        try:
+            from tabs._widgets import ExcelExporter
+            out = (ExcelExporter(path)
+                   .add('תחזיות פר-תא', forecasts_df)
+                   .add('סיכום חודשי', summary_df)
+                   .save())
+            if out:
+                QMessageBox.information(self, "נשמר",
+                                        f"נשמר: {out}\n\n"
+                                        f"שורות: {len(forecasts_df)}, "
+                                        f"חודשים: {len(future_months)}")
+            else:
+                QMessageBox.warning(self, "שגיאה", "לא נכתב כלום (אין נתונים).")
+        except Exception as e:
+            logger.exception("export per-cell failed")
+            QMessageBox.critical(self, "שגיאה בייצוא", str(e))
