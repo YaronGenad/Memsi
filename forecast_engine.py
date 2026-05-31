@@ -286,7 +286,19 @@ def forecast_arima(series: pd.Series, horizon: int,
     if len(y) == 0:
         return _result_df(months, np.zeros(horizon))
 
-    last_val = float(y[-1])
+    # Sprint C8.0: weighted-recency של 3 חודשים אחרונים במקום iloc[-1].
+    # ה-naive-prev הקודם לקח רק את החודש האחרון. במהלך regime change
+    # (war drop, recovery) זה רגיש מדי ל-noise של חודש בודד. הרצף
+    # 661→244→255 (Feb→Apr 2026) יצר תחזית מעורפלת. שקלול exponential
+    # [0.2, 0.3, 0.5] על 3 החודשים האחרונים נותן יותר משקל לחודש האחרון
+    # אבל מחליק noise — אומדן 250 על הרצף לעיל במקום 255 ניידי או 800
+    # rolling-12.
+    if len(y) >= 3:
+        weights = np.array([0.2, 0.3, 0.5])
+        last_val = float(np.dot(y[-3:], weights))
+    else:
+        last_val = float(y[-1])
+
     # std של 12 חודשים אחרונים (אם יש). Sprint C7.7: עברנו ל-±1.96σ
     # (≈95% CI תחת הנחת נורמליות) במקום ±1σ (~68%). ה-safety_stock של
     # newsvendor נשען על ה-upper הזה, ו-68% היה מוביל לחוסר-מלאי בכ-32%
@@ -390,13 +402,17 @@ def forecast_xgboost(series: pd.Series, horizon: int,
         return _result_df(months, np.zeros(horizon))
 
     # rate = qty/flight בחודשים האחרונים. fallback ל-naive_prev אם אין flights.
+    # Sprint C8.0: שומרים גם את ה-index של כל rate כדי לחשב weighted-mean
+    # אחר-כך, ולא mean אחיד.
     rates = []
+    rate_indices = []
     for i in range(max(0, len(series) - 6), len(series)):
         ym = series.index[i]
         flights = _flight_volume_for(ym)
         if flights and flights > 0.01:  # _flight_volume_for מחזיר normalized או 0
             # ה-flight מ-_flight_volume_for הוא normalized; ננסה לקבל את הערך הגולמי
             rates.append(y[i] / max(flights, 0.1))
+            rate_indices.append(i)
     if not rates:
         # אין נתוני טיסות → fallback ל-naive_prev
         last_val = float(y[-1])
@@ -405,7 +421,19 @@ def forecast_xgboost(series: pd.Series, horizon: int,
         pred = np.full(horizon, last_val)
         return _result_df(months, pred, pred - sigma, pred + sigma)
 
-    avg_rate = float(np.mean(rates))
+    # Sprint C8.0: weighted-mean של ה-rates במקום uniform. סדר ה-rates
+    # הוא כרונולוגי (עתיק→חדש). שקלול exp עם half-life של 2 חודשים
+    # נותן ל-rate האחרון weight=1, לרצן שלפניו 0.71, וכן הלאה.
+    # שיקול: rate ב-war months הוא ~0 (כי flights crashed והdemand crashed
+    # יחד), מה שמושך את ה-avg למטה. עדיף לתת לחודש האחרון יותר משקל.
+    n_rates = len(rates)
+    HALF_LIFE_MONTHS = 2.0
+    rate_weights = np.array([
+        0.5 ** ((n_rates - 1 - j) / HALF_LIFE_MONTHS)
+        for j in range(n_rates)
+    ])
+    rate_weights /= rate_weights.sum()
+    avg_rate = float(np.dot(rates, rate_weights))
 
     # ה-flights הצפויים: נשתמש ב-flight_curr לכל חודש עתידי. אם אין —
     # נשתמש בממוצע 6 חודשים אחרונים.
@@ -460,6 +488,53 @@ def newsvendor_order(mean_demand: float, std_demand: float,
 #  ממשק מאחד
 # ────────────────────────────────────────────────
 
+def _check_event_data_freshness(series: pd.Series,
+                                 events_df: pd.DataFrame) -> None:
+    """Sprint C8.0: בדיקת sanity על עקביות בין series ל-events.
+
+    אם 3 החודשים האחרונים מראים drop של >40% מ-baseline (חודשים 4-15
+    אחורה), אבל ה-events לא מסומנים עם is_war/is_military_op — ככל
+    הנראה ה-events table stale וצריך עדכון. כתב warning ל-log.
+
+    הרציונל: זה בדיוק התרחיש של מאי 2026 — drop מ-~800 ל-~250 (-70%)
+    כשה-events עדיין אמרו 'is_ceasefire=1, regime=LOW'. המודלים לא
+    "ראו" את המלחמה.
+    """
+    if len(series) < 6 or events_df is None or events_df.empty:
+        return
+    try:
+        recent_3 = float(series.iloc[-3:].mean())
+        if len(series) >= 15:
+            baseline = float(series.iloc[-15:-3].mean())
+        else:
+            baseline = float(series.iloc[:-3].mean())
+        if baseline <= 0:
+            return
+        if recent_3 / baseline >= 0.6:
+            return  # אין drop משמעותי
+
+        recent_yms = list(series.index[-3:])
+        recent_events = events_df[events_df['year_month'].isin(recent_yms)]
+        if recent_events.empty:
+            return
+        war_cols = [c for c in ('is_war', 'is_military_op')
+                    if c in recent_events.columns]
+        if not war_cols:
+            return
+        war_flags = recent_events[war_cols].fillna(0).any(axis=1).any()
+        if not war_flags:
+            drop_pct = (1 - recent_3 / baseline) * 100
+            logger.warning(
+                "forecast sanity: %.0f%% drop in last 3 months but no "
+                "is_war/is_military_op flags in events. forecast_events "
+                "may be stale. Months: %s (recent_3=%.0f, baseline=%.0f)",
+                drop_pct, recent_yms, recent_3, baseline
+            )
+    except Exception:
+        # זה רק warning — לעולם לא נכשל forecast בגלל סניטי
+        logger.debug("freshness check failed (non-fatal)", exc_info=True)
+
+
 def run_all_models(series: pd.Series, horizon: int,
                    events_df: pd.DataFrame, context: dict,
                    progress_callback=None) -> dict:
@@ -486,6 +561,9 @@ def run_all_models(series: pd.Series, horizon: int,
             logger.info(msg)
 
     logger.info("run_all_models: n=%d horizon=%d context=%s", len(series), horizon, context)
+
+    # Sprint C8.0: sanity check על freshness של events.
+    _check_event_data_freshness(series, events_df)
 
     # שימוש ב-forecast_cache עוקף אימון אם הקלטים זהים לריצה קודמת.
     # אם המטמון לא זמין (למשל בייבוא ראשוני/ביצוע מבדיקות), נופל למימושים הישירים.
