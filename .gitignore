@@ -46,3 +46,8 @@ Thumbs.db
 Output/
 *.dump
 *.zip
+
+# Research artifacts (Sprint C8.1) — not production code
+# The script research/eda_clustering.py IS tracked; only outputs aren't.
+research/output/
+RESEARCH_EDA_FINDINGS.md
