@@ -1716,7 +1716,7 @@ class ForecastTab(QWidget):
         return w
 
     def _run_per_cell(self):
-        """מפעיל את forecast_per_branch_hybrid ב-worker thread (Sprint C8.3)."""
+        """מפעיל את forecast_per_cell_pooled ב-worker thread (Sprint C8.4)."""
         horizon = {"3 חודשים": 3, "6 חודשים": 6, "9 חודשים": 9,
                    "12 חודשים": 12}.get(self.pc_horizon.currentText(), 6)
         n_folds = int(self.pc_folds.currentText())
@@ -1740,19 +1740,19 @@ class ForecastTab(QWidget):
             def run(self):
                 try:
                     from forecast_db import ForecastDB
-                    # Sprint C8.3: switched from per-cell forecast_hierarchical
-                    # to per-branch hybrid (one base level + seasonal shape per
-                    # branch, then disaggregate to categories via 6-month
-                    # proportions). Aggregate May 2026 went from 921 → ~342
-                    # (actual 396), and zombie branches are now auto-filtered.
-                    # forecast_hierarchical.py is kept on disk for rollback.
-                    from forecast_per_branch_hybrid import forecast_per_branch_hybrid
+                    # Sprint C8.4: per-cell tab now calls the SAME pooled
+                    # weekly-cell model the main forecast tab uses, so cells
+                    # match the main tab's numbers exactly. C8.3's hybrid is
+                    # kept on disk (forecast_per_branch_hybrid.py) for one-
+                    # commit rollback. forecast_hierarchical.py is the
+                    # original, also retained.
+                    from forecast_per_cell_pooled import forecast_per_cell_pooled
                     fdb = ForecastDB()
                     hist_df = fdb.get_history(branches=self.branches)
                     events_df = fdb.get_events()
                     # context default — שגרה
                     context = {'is_war': 0, 'is_ceasefire': 1, 'jewish_holiday': 0}
-                    result = forecast_per_branch_hybrid(
+                    result = forecast_per_cell_pooled(
                         hist_df, horizon=self.horizon,
                         events_df=events_df, context=context,
                         branches=self.branches,
@@ -1823,7 +1823,9 @@ class ForecastTab(QWidget):
                     'global_avg':     '#f2d7d5',   # אדום — fallback אחרון
                     'global_avg_recovered': '#f2d7d5',
                     # Sprint C8.3 — hybrid: base+seasonal פר branch, disaggregation לcell
-                    'hybrid_branch':  '#d6eaf8',   # תכלת — הגישה החדשה
+                    'hybrid_branch':  '#d6eaf8',   # תכלת — C8.3
+                    # Sprint C8.4 — pooled LinearRegression weekly-cell (זהה למסך הראשי)
+                    'pooled_weekly':  '#d1f2eb',   # ירוק-מנטה — הגישה הנוכחית
                 }.get(cf.fallback_level, '#ffffff')
                 for col, val in enumerate(row_cells):
                     it = QTableWidgetItem(val)
