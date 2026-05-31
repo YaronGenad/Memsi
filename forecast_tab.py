@@ -1716,7 +1716,7 @@ class ForecastTab(QWidget):
         return w
 
     def _run_per_cell(self):
-        """מפעיל את forecast_hierarchical ב-worker thread."""
+        """מפעיל את forecast_per_branch_hybrid ב-worker thread (Sprint C8.3)."""
         horizon = {"3 חודשים": 3, "6 חודשים": 6, "9 חודשים": 9,
                    "12 חודשים": 12}.get(self.pc_horizon.currentText(), 6)
         n_folds = int(self.pc_folds.currentText())
@@ -1740,13 +1740,19 @@ class ForecastTab(QWidget):
             def run(self):
                 try:
                     from forecast_db import ForecastDB
-                    from forecast_hierarchical import forecast_hierarchical
+                    # Sprint C8.3: switched from per-cell forecast_hierarchical
+                    # to per-branch hybrid (one base level + seasonal shape per
+                    # branch, then disaggregate to categories via 6-month
+                    # proportions). Aggregate May 2026 went from 921 → ~342
+                    # (actual 396), and zombie branches are now auto-filtered.
+                    # forecast_hierarchical.py is kept on disk for rollback.
+                    from forecast_per_branch_hybrid import forecast_per_branch_hybrid
                     fdb = ForecastDB()
                     hist_df = fdb.get_history(branches=self.branches)
                     events_df = fdb.get_events()
                     # context default — שגרה
                     context = {'is_war': 0, 'is_ceasefire': 1, 'jewish_holiday': 0}
-                    result = forecast_hierarchical(
+                    result = forecast_per_branch_hybrid(
                         hist_df, horizon=self.horizon,
                         events_df=events_df, context=context,
                         branches=self.branches,
@@ -1816,6 +1822,8 @@ class ForecastTab(QWidget):
                     'global_category':'#fadbd8',   # אדום-בהיר — fallback
                     'global_avg':     '#f2d7d5',   # אדום — fallback אחרון
                     'global_avg_recovered': '#f2d7d5',
+                    # Sprint C8.3 — hybrid: base+seasonal פר branch, disaggregation לcell
+                    'hybrid_branch':  '#d6eaf8',   # תכלת — הגישה החדשה
                 }.get(cf.fallback_level, '#ffffff')
                 for col, val in enumerate(row_cells):
                     it = QTableWidgetItem(val)
