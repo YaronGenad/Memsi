@@ -352,3 +352,45 @@ in `.iaa_pdfs/` (gitignored — re-downloads as needed).
   run `python migrate.py`. `schema_version` ensures it doesn't run twice.
 * Stale sync runs: `SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 30`
   shows recent runs and their `records_pulled`/`errors_count`.
+
+### Updating events for new war / ceasefire / military operation
+
+`forecast_events` is **hand-curated**. The models (ARIMA naive-prev,
+regime-aware Prophet, causal) rely on it to know "what kind of month
+is this". When a new geopolitical event happens, the table MUST be
+updated within ~30 days, otherwise forecasts will silently degrade.
+
+**How to update**:
+1. Edit `forecast_events.csv` for the affected months. Columns:
+   `year_month, is_war, is_military_op, is_ceasefire, jewish_holiday,
+   season, is_summer_peak, travel_impact, notes`.
+2. Add a SQL migration (e.g. `migrations/0XX_fix_XXXX_events.sql`)
+   with `UPDATE forecast_events SET ... WHERE year_month = ...` for
+   existing instances.
+3. Run `python migrate.py` against deployed DBs.
+4. Re-run forecasts; verify recent months reflect the new regime.
+
+**Historical cautionary tale (Sprint C8.0)**: The Roar of Lion war
+(Feb-Apr 2026) wasn't tagged in `forecast_events` for 3 months after
+it ended. Per-cell forecast for May 2026 was 810; actual was 396
+(+105% over-prediction). Root cause: models saw `is_ceasefire=1,
+conversion_regime=LOW` for Feb-Apr and pulled May forecast up to
+pre-war levels. The `_check_event_data_freshness` sanity check
+(added in C8.0) now logs a warning if the data shows a >40% drop
+but events don't reflect it.
+
+### Forecast model recency tuning
+
+Sprint C8.0 introduced exponential-decay weighting in three models:
+- **ARIMA naive-prev**: weighted avg of last 3 months `[0.2, 0.3, 0.5]`
+  instead of `iloc[-1]`.
+- **XGBoost flight-rate**: weighted avg of last 6 monthly rates with
+  half-life 2 months.
+- **weekly_cell LinearRegression**: `sample_weight` per training row
+  with half-life 26 weeks (~6 months).
+
+If forecasts feel "too jumpy" (over-react to a 1-month spike) or
+"too sluggish" (under-react to a real regime change), the half-life
+constants are the levers. They live in `forecast_engine.py` and
+`forecast_weekly_cell.py:_train_model`. Document any change here so
+the next maintainer knows what was tried.

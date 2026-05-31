@@ -222,10 +222,25 @@ def _train_model(dense_train: pd.DataFrame):
     X = dense_oh[feature_cols].values.astype(float)
     y = dense_oh['qty'].values
 
+    # Sprint C8.0: recency weighting. ה-LinearRegression עד C7.9 נתן
+    # משקל זהה לכל ה-30+ חודשי-היסטוריה. אחרי regime change חד (war
+    # drop במרץ 2026), המודל ראה את ה-war כעוד 4 שבועות מתוך 130+ —
+    # קטן מדי כדי להזיז את ה-coefficients. תוצאה: תחזית 810 לMay
+    # כשactual היה 396.
+    # Exponential decay עם half-life של ~26 שבועות (~6 חודשים): שבועות
+    # אחרונים מקבלים weight=1, שבועות מלפני 6 חודשים weight=0.5,
+    # מלפני שנה weight=0.25. ההיסטוריה הרחוקה עדיין משפיעה, אבל
+    # ה-recent dominate.
+    max_idx = int(dense_oh['week_idx'].max())
+    weeks_back = max_idx - dense_oh['week_idx'].astype(int)
+    HALF_LIFE_WEEKS = 26
+    sample_weight = 0.5 ** (weeks_back / HALF_LIFE_WEEKS)
+
     model = LinearRegression()
-    model.fit(X, y)
-    logger.info("forecast_weekly_cell: trained on %d cells × %d features",
-                len(X), len(feature_cols))
+    model.fit(X, y, sample_weight=sample_weight.values)
+    logger.info("forecast_weekly_cell: trained on %d cells × %d features "
+                "(recency weighted, half-life=%dwk)",
+                len(X), len(feature_cols), HALF_LIFE_WEEKS)
     return model, feature_cols, branch_cols, cat_cols
 
 
