@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "frontend",
+  "version": "0.1.0",
+  "identifier": "com.root.frontend",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "missions",
+        "title": "משימות",
+        "width": 900,
+        "height": 700,
+        "url": "index.html"
+      },
+      {
+        "label": "staff",
+        "title": "כוח אדם",
+        "width": 500,
+        "height": 700,
+        "url": "staff.html"
+      },
+      {
+        "label": "inventory",
+        "title": "מלאי",
+        "width": 500,
+        "height": 700,
+        "url": "inventory.html"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
