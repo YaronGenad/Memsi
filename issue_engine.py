@@ -173,99 +173,135 @@ def compute_inventory_issues(target_date: date = None) -> list[dict]:
     return results
 
 
-def compute_forecast_issues(from_date: date, to_date: date) -> list[dict]:
+def compute_forecast_issues(from_date: date = None, to_date: date = None) -> list[dict]:
     """
     Uses forecast_predictions + min_stock to find future shortfalls.
-    Creates predicted=True issues for future dates.
-    Returns list of issues created/updated.
+    Creates predicted=True issues for dates where forecast < min_stock.
+
+    Logic:
+    1. Get the latest forecast_run_id from forecast_runs table
+    2. JOIN forecast_predictions (latest run, model='weekly_cell' or best available)
+       with min_stock on (branch_code, category)
+    3. WHERE predicted_quantity < min_quantity → gap = min_quantity - predicted_quantity
+    4. For each gap: upsert into issues with predicted=True, confidence from forecast interval
+    5. Default date range: today+1 to today+30 if not specified
+
+    Handle gracefully if forecast_predictions is empty or tables don't exist.
     """
+    if from_date is None:
+        from_date = date.today() + timedelta(days=1)
+    if to_date is None:
+        to_date = date.today() + timedelta(days=30)
+
     weights = _get_category_weights()
     results = []
 
     try:
-        # Get the latest forecast run with per-branch/cell predictions
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT fp.branch, fp.cell AS category, fp.year_month,
-                       fp.forecast, fp.lower
+                SELECT
+                    fp.year_month,
+                    fp.branch AS branch_code,
+                    fp.cell AS category,
+                    fp.forecast AS predicted_quantity,
+                    fp.lower,
+                    fp.upper,
+                    ms.min_quantity
                 FROM forecast_predictions fp
-                INNER JOIN forecast_runs fr ON fp.run_id = fr.run_id
-                WHERE fp.branch IS NOT NULL
-                  AND fp.cell IS NOT NULL
-                  AND fr.run_id = (
-                      SELECT MAX(run_id) FROM forecast_runs
-                  )
+                JOIN forecast_runs fr ON fp.run_id = fr.run_id
+                JOIN min_stock ms ON ms.branch_code = fp.branch AND ms.category = fp.cell
+                WHERE fr.run_id = (SELECT MAX(run_id) FROM forecast_runs)
+                  AND fp.model = 'weekly_cell'
+                  AND fp.forecast < ms.min_quantity
                 ORDER BY fp.branch, fp.cell, fp.year_month
             """)
             predictions = cur.fetchall()
     except Exception as e:
         logger.warning("compute_forecast_issues: could not load forecast_predictions: %s", e)
-        return []
+        # Try without model filter in case 'weekly_cell' rows don't exist
+        try:
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        fp.year_month,
+                        fp.branch AS branch_code,
+                        fp.cell AS category,
+                        fp.forecast AS predicted_quantity,
+                        fp.lower,
+                        fp.upper,
+                        ms.min_quantity
+                    FROM forecast_predictions fp
+                    JOIN forecast_runs fr ON fp.run_id = fr.run_id
+                    JOIN min_stock ms ON ms.branch_code = fp.branch AND ms.category = fp.cell
+                    WHERE fr.run_id = (SELECT MAX(run_id) FROM forecast_runs)
+                      AND fp.forecast < ms.min_quantity
+                    ORDER BY fp.branch, fp.cell, fp.year_month
+                """)
+                predictions = cur.fetchall()
+        except Exception as e2:
+            logger.warning("compute_forecast_issues: fallback query also failed: %s", e2)
+            return []
 
     if not predictions:
-        logger.info("compute_forecast_issues: no per-branch forecasts available")
+        logger.info("compute_forecast_issues: no shortfall forecasts available")
         return []
-
-    # Build min_stock lookup: {(branch, category): min_qty}
-    stock_data = _get_min_stock_data()
-    min_lookup: dict[tuple[str, str], float] = {
-        (r['branch'], r['category']): r['recommended_min']
-        for r in stock_data
-    }
 
     try:
         with get_conn() as conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            for branch, category, year_month, forecast_qty, lower in predictions:
-                if not branch or not category:
+            for year_month, branch_code, category, predicted_quantity, lower, upper, min_quantity in predictions:
+                if not branch_code or not category:
                     continue
 
-                # Convert year_month (e.g. '2026-07') to a representative date
+                # Convert year_month (e.g. '2026-07') to first day of that month
                 try:
-                    pred_date = date.fromisoformat(year_month + '-01')
+                    issue_date = date.fromisoformat(year_month + '-01')
                 except ValueError:
                     continue
 
-                if not (from_date <= pred_date <= to_date):
+                if not (from_date <= issue_date <= to_date):
                     continue
 
-                min_qty = min_lookup.get((branch, category), 0.0)
+                min_qty = float(min_quantity) if min_quantity is not None else 0.0
                 if min_qty <= 0:
                     continue
 
-                forecast_val = float(forecast_qty) if forecast_qty is not None else 0.0
-                lower_val = float(lower) if lower is not None else forecast_val
+                forecast_val = float(predicted_quantity) if predicted_quantity is not None else 0.0
+                gap = forecast_val - min_qty  # negative = shortfall
 
-                # Confidence: how likely lower bound still meets min_stock
-                # Simple proxy: if even lower bound < min_qty → high concern
-                if lower_val < min_qty:
-                    gap = lower_val - min_qty
-                    confidence = round(max(0.0, min(1.0, forecast_val / min_qty)), 2)
-                    severity = _compute_severity(gap, min_qty, category, weights)
+                # Confidence: lower/upper if both non-null and upper > 0, else 0.7
+                lower_val = float(lower) if lower is not None else None
+                upper_val = float(upper) if upper is not None else None
+                if lower_val is not None and upper_val is not None and upper_val > 0:
+                    confidence = round(lower_val / upper_val, 2)
+                else:
+                    confidence = 0.7
 
-                    cur.execute("""
-                        INSERT INTO issues
-                            (issue_date, branch_code, category, issue_type,
-                             severity, status, gap, min_quantity, current_quantity,
-                             predicted, confidence, updated_at)
-                        VALUES (%s, %s, %s, 'INVENTORY_SHORTAGE',
-                                %s, 'OPEN', %s, %s, %s,
-                                TRUE, %s, NOW())
-                        ON CONFLICT (issue_date, branch_code, category, issue_type)
-                        WHERE status != 'RESOLVED'
-                        DO UPDATE SET
-                            severity         = EXCLUDED.severity,
-                            gap              = EXCLUDED.gap,
-                            min_quantity     = EXCLUDED.min_quantity,
-                            current_quantity = EXCLUDED.current_quantity,
-                            confidence       = EXCLUDED.confidence,
-                            predicted        = TRUE,
-                            updated_at       = NOW()
-                        RETURNING *
-                    """, (pred_date, branch, category, severity,
-                          gap, min_qty, forecast_val, confidence))
-                    issue_row = cur.fetchone()
-                    if issue_row:
-                        results.append(dict(issue_row))
+                severity = _compute_severity(gap, min_qty, category, weights)
+
+                cur.execute("""
+                    INSERT INTO issues
+                        (issue_date, branch_code, category, issue_type,
+                         severity, status, gap, min_quantity, current_quantity,
+                         predicted, confidence, updated_at)
+                    VALUES (%s, %s, %s, 'INVENTORY_SHORTAGE',
+                            %s, 'OPEN', %s, %s, %s,
+                            TRUE, %s, NOW())
+                    ON CONFLICT (issue_date, branch_code, category, issue_type)
+                    WHERE status != 'RESOLVED'
+                    DO UPDATE SET
+                        severity         = EXCLUDED.severity,
+                        gap              = EXCLUDED.gap,
+                        min_quantity     = EXCLUDED.min_quantity,
+                        current_quantity = EXCLUDED.current_quantity,
+                        confidence       = EXCLUDED.confidence,
+                        predicted        = TRUE,
+                        updated_at       = NOW()
+                    RETURNING *
+                """, (issue_date, branch_code, category, severity,
+                      gap, min_qty, forecast_val, confidence))
+                issue_row = cur.fetchone()
+                if issue_row:
+                    results.append(dict(issue_row))
 
     except Exception as e:
         logger.error("compute_forecast_issues failed: %s", e)

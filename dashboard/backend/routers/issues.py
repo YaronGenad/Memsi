@@ -82,14 +82,46 @@ def _serialize_issue(row: dict) -> IssueResponse:
 
 @router.get("/issues/dates")
 def get_dates_with_issues(days_ahead: int = Query(default=30)):
-    """Return dates that have issues within the next N days."""
+    """Return dates that have issues within the next N days.
+
+    Response:
+      dates           — dates with real OPEN/PENDING issues
+      predicted_dates — dates that only have predicted issues (no real OPEN/PENDING)
+    """
     if not _engine_available:
-        return {"dates": []}
+        return {"dates": [], "predicted_dates": []}
     try:
-        dates = issue_engine.get_dates_with_issues(days_ahead)
-        return {"dates": dates}
+        real_dates = set(issue_engine.get_dates_with_issues(days_ahead))
+
+        # Fetch dates that have predicted=True issues
+        import sys
+        sys.path.insert(0, '/home/user/Memsi')
+        from db_config import get_conn
+        today = datetime.date.today()
+        end_date = today + datetime.timedelta(days=days_ahead)
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT DISTINCT issue_date
+                        FROM issues
+                        WHERE issue_date BETWEEN %s AND %s
+                          AND predicted = TRUE
+                        ORDER BY issue_date
+                    """, (today, end_date))
+                    all_predicted = {row[0].isoformat() for row in cur.fetchall()}
+        except Exception:
+            all_predicted = set()
+
+        # predicted_dates = only-predicted (no real OPEN/PENDING on that date)
+        predicted_only = sorted(all_predicted - real_dates)
+
+        return {
+            "dates": sorted(real_dates),
+            "predicted_dates": predicted_only,
+        }
     except Exception:
-        return {"dates": []}
+        return {"dates": [], "predicted_dates": []}
 
 
 @router.get("/issues", response_model=list[IssueResponse])

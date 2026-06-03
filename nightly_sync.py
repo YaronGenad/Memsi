@@ -303,6 +303,14 @@ def run_full(days: int = 30, skip_iaa: bool = False,
         _step('iaa',              sync_iaa,              lg=lg)
         _step('flight_schedule',  sync_flight_schedule,  lg=lg)
 
+    # Issue engine refresh — non-critical, runs after all data is synced
+    try:
+        from issue_engine import run_full_refresh
+        run_full_refresh()
+        lg.info("Issue engine refresh completed")
+    except Exception as e:
+        lg.warning("Issue engine refresh failed (non-critical): %s", e)
+
     if not errors:
         status, exit_code = 'ok', 0
     elif pulled:
