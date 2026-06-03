@@ -30,17 +30,23 @@ export const MissionsApp: React.FC = () => {
   const [isPlanningMode, setIsPlanningMode] = useState(false);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [datesWithIssues, setDatesWithIssues] = useState<string[]>([]);
+  const [predictedDates, setPredictedDates] = useState<string[]>([]);
+  const [includePredicted, setIncludePredicted] = useState<boolean>(false);
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [draftChanges, setDraftChanges] = useState<Map<number, { status: string; note?: string }>>(new Map());
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('OPEN');
 
   // Fetch issues for selected date + current filter
-  const fetchIssues = useCallback(async (date: string, filter: string) => {
+  const fetchIssues = useCallback(async (date: string, filter: string, withPredicted: boolean) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ date });
-      if (filter !== 'ALL') params.set('status', filter);
+      if (withPredicted) {
+        // No status filter — include PREDICTED alongside real issues
+      } else if (filter !== 'ALL') {
+        params.set('status', filter);
+      }
       const res = await fetch(`${BACKEND_URL}/issues?${params}`);
       if (res.ok) {
         const data: Issue[] = await res.json();
@@ -58,8 +64,9 @@ export const MissionsApp: React.FC = () => {
     try {
       const res = await fetch(`${BACKEND_URL}/issues/dates?days_ahead=30`);
       if (res.ok) {
-        const data: { dates: string[] } = await res.json();
-        setDatesWithIssues(data.dates);
+        const data: { dates: string[]; predicted_dates?: string[] } = await res.json();
+        setDatesWithIssues(data.dates ?? []);
+        setPredictedDates(data.predicted_dates ?? []);
       }
     } catch (e) {
       console.error('Failed to fetch issue dates', e);
@@ -71,9 +78,9 @@ export const MissionsApp: React.FC = () => {
   }, [fetchDates]);
 
   useEffect(() => {
-    fetchIssues(selectedDate, statusFilter);
+    fetchIssues(selectedDate, statusFilter, includePredicted);
     setSelectedIssue(null);
-  }, [selectedDate, statusFilter, fetchIssues]);
+  }, [selectedDate, statusFilter, includePredicted, fetchIssues]);
 
   const handleIssueSelect = (issue: Issue) => {
     setSelectedIssue(issue);
@@ -124,7 +131,7 @@ export const MissionsApp: React.FC = () => {
         })
       );
       await Promise.all(patches);
-      await fetchIssues(selectedDate, statusFilter);
+      await fetchIssues(selectedDate, statusFilter, includePredicted);
       await fetchDates();
       exitPlanningMode(false);
     } catch (e) {
@@ -159,7 +166,7 @@ export const MissionsApp: React.FC = () => {
     setLoading(true);
     try {
       await fetch(`${BACKEND_URL}/issues/refresh?date=${selectedDate}`, { method: 'POST' });
-      await fetchIssues(selectedDate, statusFilter);
+      await fetchIssues(selectedDate, statusFilter, includePredicted);
       await fetchDates();
     } catch (e) {
       console.error('Refresh failed', e);
@@ -202,6 +209,7 @@ export const MissionsApp: React.FC = () => {
         <DateNavigator
           selectedDate={selectedDate}
           datesWithIssues={datesWithIssues}
+          predictedDates={predictedDates}
           onDateChange={handleDateChange}
         />
 
@@ -264,24 +272,46 @@ export const MissionsApp: React.FC = () => {
           )}
         </span>
 
-        <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          style={{
-            background: '#2d3748',
-            color: '#e2e8f0',
-            border: '1px solid #4a5568',
-            borderRadius: 4,
-            padding: '4px 8px',
-            fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          <option value="OPEN">פתוח</option>
-          <option value="PENDING">בטיפול</option>
-          <option value="RESOLVED">נסגר</option>
-          <option value="ALL">הכל</option>
-        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 13,
+              color: '#a0aec0',
+              cursor: 'pointer',
+              userSelect: 'none',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={includePredicted}
+              onChange={e => setIncludePredicted(e.target.checked)}
+              style={{ cursor: 'pointer', accentColor: '#dd6b20' }}
+            />
+            כולל חזויות
+          </label>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            disabled={includePredicted}
+            style={{
+              background: '#2d3748',
+              color: includePredicted ? '#718096' : '#e2e8f0',
+              border: '1px solid #4a5568',
+              borderRadius: 4,
+              padding: '4px 8px',
+              fontSize: 13,
+              cursor: includePredicted ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <option value="OPEN">פתוח</option>
+            <option value="PENDING">בטיפול</option>
+            <option value="RESOLVED">נסגר</option>
+            <option value="ALL">הכל</option>
+          </select>
+        </div>
       </div>
 
       {/* Scrollable cards area */}

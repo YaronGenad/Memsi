@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Issue } from '../types';
 
 interface IssueCardProps {
@@ -73,6 +73,13 @@ export default function IssueCard({
   const [noteInput, setNoteInput] = useState('');
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [pulseHigh, setPulseHigh] = useState(true);
+
+  useEffect(() => {
+    if (!issue.predicted) return;
+    const timer = setInterval(() => setPulseHigh(h => !h), 900);
+    return () => clearInterval(timer);
+  }, [issue.predicted]);
 
   const severityColor = getSeverityColor(issue.severity);
 
@@ -174,8 +181,22 @@ export default function IssueCard({
                 borderRadius: '4px',
                 padding: '1px 5px',
                 fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
               }}
             >
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  backgroundColor: '#3182ce',
+                  opacity: pulseHigh ? 1 : 0.3,
+                  transition: 'opacity 0.9s ease-in-out',
+                }}
+              />
               חזוי
             </span>
           )}

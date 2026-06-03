@@ -2,7 +2,8 @@ import React from 'react';
 
 interface DateNavigatorProps {
   selectedDate: string;     // ISO date
-  datesWithIssues: string[]; // dates that have issues (show a dot)
+  datesWithIssues: string[]; // dates that have real issues (solid red dot)
+  predictedDates: string[];  // dates with only predicted issues (hollow orange dot)
   onDateChange: (date: string) => void;
 }
 
@@ -43,9 +44,11 @@ function formatDateLabel(isoDate: string): string {
 export default function DateNavigator({
   selectedDate,
   datesWithIssues,
+  predictedDates,
   onDateChange,
 }: DateNavigatorProps) {
   const issueSet = new Set(datesWithIssues);
+  const predictedSet = new Set(predictedDates);
 
   const prevDate = addDays(selectedDate, -1);
   const nextDate = addDays(selectedDate, 1);
@@ -133,11 +136,13 @@ export default function DateNavigator({
       <div style={chipsRowStyle}>
         {chips.map((chipDate) => {
           const isSelected = chipDate === selectedDate;
-          const hasIssues = issueSet.has(chipDate);
+          const hasRealIssues = issueSet.has(chipDate);
+          // Only show predicted dot if no real issues on this date
+          const hasPredictedOnly = !hasRealIssues && predictedSet.has(chipDate);
 
           const chipStyle: React.CSSProperties = {
             position: 'relative',
-            padding: '4px 10px',
+            padding: '4px 10px 12px 10px',
             borderRadius: '9999px',
             border: isSelected ? '2px solid #3182ce' : '1px solid #e2e8f0',
             backgroundColor: isSelected ? '#ebf8ff' : '#f7fafc',
@@ -156,17 +161,37 @@ export default function DateNavigator({
               title={chipDate}
             >
               {formatDateLabel(chipDate)}
-              {hasIssues && (
+              {hasRealIssues && (
                 <span
+                  title="יש בעיות פתוחות"
                   style={{
                     position: 'absolute',
-                    top: '2px',
-                    right: '4px',
+                    bottom: '3px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
                     width: '6px',
                     height: '6px',
                     borderRadius: '50%',
                     backgroundColor: '#e53e3e',
                     display: 'inline-block',
+                  }}
+                />
+              )}
+              {hasPredictedOnly && (
+                <span
+                  title="יש בעיות חזויות"
+                  style={{
+                    position: 'absolute',
+                    bottom: '3px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    backgroundColor: 'transparent',
+                    border: '1.5px solid #dd6b20',
+                    display: 'inline-block',
+                    boxSizing: 'border-box',
                   }}
                 />
               )}
