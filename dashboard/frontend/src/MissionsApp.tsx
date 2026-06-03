@@ -134,6 +134,27 @@ export const MissionsApp: React.FC = () => {
     }
   };
 
+  const handleAssetDrop = async (issueId: number, assetData: any) => {
+    const response = await fetch(`${BACKEND_URL}/issues/${issueId}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        asset_type: assetData.type,
+        asset_id: assetData.type === 'staff' ? assetData.id : null,
+        branch_code: assetData.branch_code,
+        category: assetData.category ?? null,
+        quantity: assetData.quantity ?? null,
+      }),
+    });
+
+    if (response.ok) {
+      setIssues(prev => prev.map(i =>
+        i.id === issueId ? { ...i, status: 'PENDING' } : i
+      ));
+      setDraftChanges(prev => new Map(prev).set(issueId, { status: 'PENDING' }));
+    }
+  };
+
   const handleRefresh = async () => {
     setLoading(true);
     try {
@@ -292,6 +313,7 @@ export const MissionsApp: React.FC = () => {
               onSelect={handleIssueSelect}
               onStatusChange={handleStatusChange}
               isDraft={draftChanges.has(issue.id)}
+              onAssetDrop={isPlanningMode ? handleAssetDrop : undefined}
             />
           ))
         )}

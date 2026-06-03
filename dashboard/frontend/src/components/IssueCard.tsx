@@ -8,6 +8,7 @@ interface IssueCardProps {
   onSelect: (issue: Issue) => void;
   onStatusChange: (id: number, status: string, note?: string) => void;
   isDraft?: boolean;
+  onAssetDrop?: (issueId: number, assetData: any) => void;
 }
 
 function getSeverityColor(severity: number): string {
@@ -67,6 +68,7 @@ export default function IssueCard({
   onSelect,
   onStatusChange,
   isDraft = false,
+  onAssetDrop,
 }: IssueCardProps) {
   const [noteInput, setNoteInput] = useState('');
   const [showNoteInput, setShowNoteInput] = useState(false);
@@ -90,6 +92,10 @@ export default function IssueCard({
       : '0 1px 3px rgba(0,0,0,0.08)',
     transition: 'box-shadow 0.15s',
   };
+
+  const selectedBorder = issue.predicted
+    ? (isSelected ? '2px dashed #3182ce' : '1px dashed #a0aec0')
+    : (isSelected ? '2px solid #3182ce' : '1px solid #e2e8f0');
 
   // Override border shorthand for predicted dashed style
   const wrapperStyle: React.CSSProperties = issue.predicted
@@ -127,6 +133,16 @@ export default function IssueCard({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onSelect(issue)}
+      onDragOver={isPlanningMode ? (e) => { e.preventDefault(); e.currentTarget.style.outline = '2px dashed #68d391'; } : undefined}
+      onDragLeave={isPlanningMode ? (e) => { e.currentTarget.style.outline = selectedBorder; } : undefined}
+      onDrop={isPlanningMode ? (e) => {
+        e.preventDefault();
+        e.currentTarget.style.outline = selectedBorder;
+        try {
+          const data = JSON.parse(e.dataTransfer.getData('application/json'));
+          onAssetDrop?.(issue.id, data);
+        } catch {}
+      } : undefined}
     >
       {/* Top row */}
       <div

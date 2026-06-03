@@ -167,6 +167,99 @@ def update_issue_status(issue_id: int, body: IssueStatusUpdate):
     return _serialize_issue(updated)
 
 
+class AssetAssignment(BaseModel):
+    asset_type: str        # 'staff' | 'inventory'
+    asset_id: Optional[int] = None   # employee id (for staff)
+    branch_code: Optional[str] = None  # source branch (for inventory)
+    category: Optional[str] = None   # for inventory
+    quantity: Optional[int] = None   # for inventory
+    note: Optional[str] = None
+
+
+@router.post("/issues/{issue_id}/assign", response_model=IssueResponse)
+def assign_asset(issue_id: int, assignment: AssetAssignment):
+    """
+    Records that an asset (staff member or inventory) has been assigned to resolve an issue.
+    - Updates issue status to PENDING
+    - Appends assignment info to resolution_note
+    - Returns updated issue
+    """
+    if not _engine_available:
+        raise HTTPException(status_code=503, detail="Issue engine not available")
+
+    if assignment.asset_type == 'staff':
+        formatted_note = f"staff:employee_id={assignment.asset_id}"
+    else:
+        formatted_note = (
+            f"inventory:branch={assignment.branch_code},"
+            f"category={assignment.category},"
+            f"qty={assignment.quantity}"
+        )
+    if assignment.note:
+        formatted_note += f" | {assignment.note}"
+
+    try:
+        updated = issue_engine.update_issue_status(
+            issue_id=issue_id,
+            status='PENDING',
+            resolution_note=formatted_note,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Issue {issue_id} not found")
+
+    return _serialize_issue(updated)
+
+
+class AssetAssignment(BaseModel):
+    asset_type: str        # 'staff' | 'inventory'
+    asset_id: Optional[int] = None   # employee id (for staff)
+    branch_code: Optional[str] = None  # source branch (for inventory)
+    category: Optional[str] = None   # for inventory
+    quantity: Optional[int] = None   # for inventory
+    note: Optional[str] = None
+
+
+@router.post("/issues/{issue_id}/assign", response_model=IssueResponse)
+def assign_asset(issue_id: int, assignment: AssetAssignment):
+    """
+    Records that an asset (staff member or inventory) has been assigned to resolve an issue.
+    - Updates issue status to PENDING
+    - Appends assignment info to resolution_note
+    - Returns updated issue
+    """
+    if not _engine_available:
+        raise HTTPException(status_code=503, detail="Issue engine not available")
+
+    if assignment.asset_type == 'staff':
+        resolution_note = f"staff:employee_id={assignment.asset_id}"
+    else:
+        resolution_note = (
+            f"inventory:branch={assignment.branch_code},"
+            f"category={assignment.category},"
+            f"qty={assignment.quantity}"
+        )
+
+    if assignment.note:
+        resolution_note += f" | {assignment.note}"
+
+    try:
+        updated = issue_engine.update_issue_status(
+            issue_id=issue_id,
+            status='PENDING',
+            resolution_note=resolution_note,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Issue {issue_id} not found")
+
+    return _serialize_issue(updated)
+
+
 @router.post("/issues/refresh")
 def refresh_issues(date: Optional[str] = Query(default=None)):
     """Trigger compute_inventory_issues for the given date (default today)."""
