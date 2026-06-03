@@ -1,3 +1,13 @@
+export interface InventoryItem {
+  location_type: 'marlug' | 'branch';
+  branch_code: string;
+  category: string;
+  available_quantity: number;
+  min_quantity: number;
+  current_quantity: number;
+  status: 'AVAILABLE' | 'ASSIGNED';
+}
+
 export interface Issue {
   id: number;
   issue_date: string;       // ISO date

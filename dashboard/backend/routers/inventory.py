@@ -118,3 +118,88 @@ def get_forecast_shortfalls(from_date: str = None, to_date: str = None):
         ]
     except Exception:
         return []
+
+
+@router.get("/inventory/available")
+def get_available_inventory(category: str = None, exclude_branch: str = None):
+    """
+    Returns available stock for a category across all locations.
+    'Available' = current_quantity > min_quantity (surplus).
+    'Assigned' = also in transit / PENDING issues (predicted=false).
+    Marlug = branch_code '800' or '08'.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Detect marlug branch code (try '800' and '08')
+                params: list = []
+                cat_filter = ""
+                excl_filter = ""
+                if category:
+                    cat_filter = " AND ms.category = %s"
+                    params.append(category)
+                if exclude_branch:
+                    excl_filter = " AND li.warehouse_code != %s"
+                    params.append(exclude_branch)
+
+                cur.execute(f"""
+                    SELECT
+                        li.warehouse_code                          AS branch_code,
+                        ms.category                               AS category,
+                        CAST(li.quantity AS FLOAT)                AS current_quantity,
+                        CAST(ms.min_quantity AS FLOAT)            AS min_quantity,
+                        CAST(li.quantity - ms.min_quantity AS FLOAT) AS available_quantity,
+                        CASE
+                            WHEN li.warehouse_code IN ('800', '08') THEN 'marlug'
+                            ELSE 'branch'
+                        END                                       AS location_type
+                    FROM local_inventory li
+                    JOIN min_stock ms
+                      ON ms.branch_code = li.warehouse_code
+                     AND ms.category    = li.sku
+                    WHERE li.quantity > ms.min_quantity
+                    {cat_filter}
+                    {excl_filter}
+                    ORDER BY
+                        CASE WHEN li.warehouse_code IN ('800', '08') THEN 0 ELSE 1 END,
+                        (li.quantity - ms.min_quantity) DESC
+                """, params)
+                rows = cur.fetchall()
+
+        # Fetch PENDING assigned issues (predicted=false) to mark as ASSIGNED
+        assigned_keys: set = set()
+        try:
+            with get_conn() as conn2:
+                with conn2.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur2:
+                    a_params: list = []
+                    a_cat = ""
+                    if category:
+                        a_cat = " AND category = %s"
+                        a_params.append(category)
+                    cur2.execute(f"""
+                        SELECT branch_code, category
+                        FROM issues
+                        WHERE predicted = false
+                          AND status = 'PENDING'
+                        {a_cat}
+                    """, a_params)
+                    for r in cur2.fetchall():
+                        assigned_keys.add((r["branch_code"], r["category"]))
+        except Exception:
+            pass
+
+        result = []
+        for r in rows:
+            key = (r["branch_code"], r["category"])
+            result.append({
+                "location_type": r["location_type"],
+                "branch_code": r["branch_code"],
+                "category": r["category"],
+                "current_quantity": int(r["current_quantity"]) if r["current_quantity"] is not None else 0,
+                "min_quantity": int(r["min_quantity"]) if r["min_quantity"] is not None else 0,
+                "available_quantity": int(r["available_quantity"]) if r["available_quantity"] is not None else 0,
+                "status": "ASSIGNED" if key in assigned_keys else "AVAILABLE",
+            })
+        return result
+    except Exception:
+        return []
