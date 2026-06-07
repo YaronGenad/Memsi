@@ -629,19 +629,23 @@ def update_external_repair_damage_report(repair_id: int,
             (damage_report_number, repair_id))
 
 
-def get_internal_repairs_at_branch(branch_code: str, before_date,
-                                    days_back: int = 14):
-    """תיקונים פנימיים (לא החלפות) בסניף, בחלון [before_date - days_back,
-    before_date]. עושה JOIN בין documents ל-logfile, מסנן ל-partname-ים
-    שמופיעים ברשימת ה-SKUs לתיקון.
+def get_internal_repairs_at_branch(branch_code: str, repair_date,
+                                    days_back: int = 14,
+                                    days_forward: int = 14):
+    """תיקונים פנימיים (לא החלפות) בסניף, בחלון
+    [repair_date - days_back, repair_date + days_forward].
+
+    הסיבה לחלון דו-כיווני: יש סניפים שמריצים בקופה רק אחרי שהתיקון חוזר
+    מהמעבדה. בסניפים כאלה, ה-DOCNO הפנימי בא *אחרי* תאריך-הספק (וזה תקין).
 
     Returns a pandas DataFrame עם העמודות:
         docno, curdate, branchname, partname, topartdes, tquant, ucost, custname
-    Ordered by curdate DESC, docno.
+    Ordered by curdate ASC (כדי שהתאריכים יוצגו כסדר ההתרחשות).
     """
     import pandas as pd
     from datetime import timedelta
-    start = before_date - timedelta(days=days_back)
+    start = repair_date - timedelta(days=days_back)
+    end = repair_date + timedelta(days=days_forward)
     with get_conn() as conn:
         df = pd.read_sql_query("""
             SELECT d.docno, d.curdate, d.branchname,
@@ -653,11 +657,32 @@ def get_internal_repairs_at_branch(branch_code: str, before_date,
               AND d.curdate >= %s
               AND d.curdate <= %s
               AND l.partname IS NOT NULL
-            ORDER BY d.curdate DESC, d.docno
-        """, conn, params=(branch_code, start, before_date))
+            ORDER BY d.curdate ASC, d.docno
+        """, conn, params=(branch_code, start, end))
     if df.empty:
         return df
     # סינון לתיקונים בלבד — ה-SKU מופיע בטבלאות מחירי-תיקון.
     repair_skus = set(_cached('repair_skus', _load_repair_skus))
     mask = df['partname'].astype(str).isin(repair_skus)
     return df[mask].reset_index(drop=True)
+
+
+def list_assigned_damage_report_numbers(exclude_id: int | None = None) -> set[str]:
+    """מחזיר set של כל ה-damage_report_number-ים ששובצו כבר ב-external_repairs.
+    כאשר ה-dialog נפתח על שורה X, נעביר exclude_id=X כדי שה-DOCNO המשובץ
+    שלה לא יופיע כ"תפוס" (כי הוא תפוס על-ידי השורה עצמה)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        if exclude_id is None:
+            cur.execute("""
+                SELECT DISTINCT damage_report_number
+                FROM external_repairs
+                WHERE damage_report_number IS NOT NULL
+            """)
+        else:
+            cur.execute("""
+                SELECT DISTINCT damage_report_number
+                FROM external_repairs
+                WHERE damage_report_number IS NOT NULL
+                  AND id <> %s
+            """, (exclude_id,))
+        return {r[0] for r in cur.fetchall()}
