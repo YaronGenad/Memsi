@@ -20,6 +20,7 @@ from qtpy.QtWidgets import (
     QFileDialog, QApplication, QDialog,
 )
 from qtpy.QtCore import Qt, QDate
+from qtpy.QtGui import QColor
 
 import domain_repository as repo
 from fetch_combined import fetch_supplier_payments_for_month
@@ -144,9 +145,9 @@ class _ExternalEntryForm(QWidget):
         # ── History table ──
         hist_group = QGroupBox("30 ההזנות האחרונות")
         hg = QVBoxLayout()
-        # +2 columns: כפתור "זיהוי" (מילוי דוח-נזק אוטומטי) + כפתור "מחק"
-        self.table = QTableWidget(0, len(self.HISTORY_COLUMNS) + 2)
-        headers = [h for _, h in self.HISTORY_COLUMNS] + ['זיהוי', 'מחיקה']
+        # +3 widget columns: זיהוי / חריגים / מחק
+        self.table = QTableWidget(0, len(self.HISTORY_COLUMNS) + 3)
+        headers = [h for _, h in self.HISTORY_COLUMNS] + ['זיהוי', 'חריגים', 'מחיקה']
         self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeToContents)
@@ -204,11 +205,20 @@ class _ExternalEntryForm(QWidget):
                         rd=row['repair_date']: self._identify_row(rid, bc, rd))
             self.table.setCellWidget(r, len(self.HISTORY_COLUMNS), identify_btn)
 
+            # כפתור "חריגים" — מציג מקרים בסניף שיש בהם retl_details1 כפול
+            # (אותה מזוודה דווחה כמה פעמים).
+            anomaly_btn = QPushButton("⚠ חריגים")
+            anomaly_btn.setStyleSheet("color:#d35400;")
+            anomaly_btn.clicked.connect(
+                lambda _checked, bc=str(row['branch_code']),
+                        rd=row['repair_date']: self._show_anomalies(bc, rd))
+            self.table.setCellWidget(r, len(self.HISTORY_COLUMNS) + 1, anomaly_btn)
+
             del_btn = QPushButton("מחק")
             del_btn.setStyleSheet("color:#c0392b;")
             del_btn.clicked.connect(
                 lambda _checked, rid=int(row['id']): self._delete_row(rid))
-            self.table.setCellWidget(r, len(self.HISTORY_COLUMNS) + 1, del_btn)
+            self.table.setCellWidget(r, len(self.HISTORY_COLUMNS) + 2, del_btn)
 
     def _delete_row(self, repair_id: int):
         reply = QMessageBox.question(
@@ -223,6 +233,12 @@ class _ExternalEntryForm(QWidget):
         except Exception as e:
             logger.exception("delete_external_repair failed")
             QMessageBox.critical(self, "שגיאה", f"{type(e).__name__}: {e}")
+
+    def _show_anomalies(self, branch_code: str, repair_date):
+        """פותח dialog שמציג DOCNOs באותו סניף ב-±חודש עם retl_details1 כפול.
+        תצוגה בלבד — לא מעדכן שום-דבר."""
+        dlg = _ShowAnomaliesDialog(self, branch_code, repair_date)
+        dlg.exec_()
 
     def _identify_row(self, repair_id: int, branch_code: str, repair_date):
         """פותח dialog לבחירת תיקון פנימי. בבחירה — שומר את ה-DOCNO ל-row."""
@@ -780,3 +796,129 @@ class _PickInternalRepairDialog(QDialog):
 
     def get_selected_docno(self) -> str | None:
         return self._selected_docno
+
+
+# ════════════════════════════════════════════════════════════════
+#  Dialog: זיהוי חריגים — DOCNOs שחולקים retl_details1 בסניף (Sprint C9.5)
+# ════════════════════════════════════════════════════════════════
+class _ShowAnomaliesDialog(QDialog):
+    """תצוגה בלבד: מציג DOCNOs בסניף שחולקים את אותו retl_details1
+    (לרוב tag-המזוודה) ב-±חודש סביב תאריך-הספק. עוזר לאתר מקרים של
+    מזוודה אחת שטופלה כמה פעמים — דיווח כפול או בעיה חוזרת.
+    """
+
+    COLUMNS = [
+        ('retl_details1', "מזהה (RETL_DETAILS1)"),
+        ('docno',         "מס' דוח"),
+        ('curdate',       'תאריך'),
+        ('custname',      'לקוח'),
+        ('branchname',    'סניף'),
+    ]
+    EXPAND_STEP_DAYS = 14
+
+    def __init__(self, parent, branch_code: str, repair_date,
+                 days_back: int = 30, days_forward: int = 30):
+        super().__init__(parent)
+        self.setWindowTitle(f"זיהוי חריגים בסניף {branch_code}")
+        self.resize(900, 540)
+        self._branch_code = branch_code
+        self._repair_date = repair_date
+        self._days_back = days_back
+        self._days_forward = days_forward
+
+        v = QVBoxLayout(self)
+
+        self._header = QLabel()
+        v.addWidget(self._header)
+
+        info = QLabel(
+            "מציג DOCNOs באותו סניף שחולקים את אותו ערך RETL_DETAILS1 — "
+            "מקרים שעלולים להעיד על דיווח כפול או על מזוודה שחזרה מספר "
+            "פעמים. שורות עם אותו מזהה מקובצות יחד.")
+        info.setStyleSheet("color:#7f8c8d;padding:4px;")
+        info.setWordWrap(True)
+        v.addWidget(info)
+
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels([h for _, h in self.COLUMNS])
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        v.addWidget(self.table, 1)
+
+        self._empty_label = QLabel(
+            "לא נמצאו חריגים בטווח שנבחר.\n"
+            "הרחב את החיפוש או רענן את הדוח הראשי לחודש הרלוונטי.")
+        self._empty_label.setStyleSheet("color:#7f8c8d;padding:20px;")
+        self._empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_label.setWordWrap(True)
+        v.addWidget(self._empty_label)
+
+        btns = QHBoxLayout()
+        self._expand_back = QPushButton(f"⮜ הרחב {self.EXPAND_STEP_DAYS} אחורה")
+        self._expand_back.clicked.connect(self._do_expand_back)
+        btns.addWidget(self._expand_back)
+        self._expand_fwd = QPushButton(f"הרחב {self.EXPAND_STEP_DAYS} קדימה ⮞")
+        self._expand_fwd.clicked.connect(self._do_expand_forward)
+        btns.addWidget(self._expand_fwd)
+        btns.addStretch()
+        close_btn = QPushButton("סגור")
+        close_btn.clicked.connect(self.accept)
+        btns.addWidget(close_btn)
+        v.addLayout(btns)
+
+        self._reload()
+
+    def _do_expand_back(self):
+        self._days_back += self.EXPAND_STEP_DAYS
+        self._reload()
+
+    def _do_expand_forward(self):
+        self._days_forward += self.EXPAND_STEP_DAYS
+        self._reload()
+
+    def _reload(self):
+        df = repo.get_anomalous_docs_at_branch(
+            self._branch_code, self._repair_date,
+            days_back=self._days_back, days_forward=self._days_forward)
+
+        n_groups = df['retl_details1'].nunique() if not df.empty else 0
+        self._header.setText(
+            f"<b>סניף:</b> {self._branch_code} &nbsp;|&nbsp; "
+            f"<b>תאריך ספק:</b> {self._repair_date.strftime('%Y-%m-%d')} &nbsp;|&nbsp; "
+            f"<b>חלון:</b> {self._days_back} אחורה, {self._days_forward} קדימה "
+            f"&nbsp;|&nbsp; "
+            f"<b>קבוצות חריגות:</b> {n_groups} &nbsp;|&nbsp; "
+            f"<b>סך שורות:</b> {len(df)}")
+
+        # קביעת רקע מתחלף לפי קבוצת retl_details1, כדי שהקיבוץ ברור עין.
+        # ערכי-tag מתחלפים → צבעים מתחלפים בין שני גוונים בהירים.
+        self.table.setRowCount(len(df))
+        self.table.setUpdatesEnabled(False)
+        try:
+            last_tag = None
+            colors = [QColor('#ffffff'), QColor('#fff7e6')]
+            color_idx = 0
+            for r, (_, row) in enumerate(df.iterrows()):
+                tag = str(row['retl_details1'])
+                if tag != last_tag:
+                    color_idx = 1 - color_idx
+                    last_tag = tag
+                bg = colors[color_idx]
+                for c, (key, _) in enumerate(self.COLUMNS):
+                    val = row[key]
+                    if hasattr(val, 'strftime'):
+                        txt = val.strftime('%Y-%m-%d')
+                    elif val is None or (isinstance(val, float) and val != val):
+                        txt = ''
+                    else:
+                        txt = str(val)
+                    item = QTableWidgetItem(txt)
+                    item.setBackground(bg)
+                    self.table.setItem(r, c, item)
+        finally:
+            self.table.setUpdatesEnabled(True)
+
+        has_rows = len(df) > 0
+        self.table.setVisible(has_rows)
+        self._empty_label.setVisible(not has_rows)

@@ -710,6 +710,47 @@ def get_internal_replacements_at_branch(branch_code: str, repair_date,
     return df[not_repair & has_luggage].reset_index(drop=True)
 
 
+def get_anomalous_docs_at_branch(branch_code: str, repair_date,
+                                   days_back: int = 30,
+                                   days_forward: int = 30):
+    """מחזיר DOCNOs בסניף-זה שחולקים retl_details1 (לרוב tag-המזוודה) עם
+    DOCNO אחר. מאתר מקרים של "מזוודה אחת טופלה כמה פעמים" — חשוב לתחקר
+    כי זה יכול להעיד על בעיה חוזרת, או על דיווח כפול בסניף.
+
+    החיפוש הוא בסניף הזה בלבד, בחלון
+    [repair_date - days_back, repair_date + days_forward].
+
+    Returns pandas DataFrame עם:
+        retl_details1, docno, curdate, custname, branchname
+    Ordered by retl_details1, curdate (כך שורות עם אותו tag מקובצות).
+    """
+    import pandas as pd
+    from datetime import timedelta
+    start = repair_date - timedelta(days=days_back)
+    end = repair_date + timedelta(days=days_forward)
+    with get_conn() as conn:
+        return pd.read_sql_query("""
+            WITH dup_tags AS (
+                SELECT retl_details1
+                FROM documents
+                WHERE branchname = %s
+                  AND curdate >= %s AND curdate <= %s
+                  AND retl_details1 IS NOT NULL
+                  AND retl_details1 <> ''
+                GROUP BY retl_details1
+                HAVING COUNT(*) > 1
+            )
+            SELECT d.retl_details1, d.docno, d.curdate,
+                   d.custname, d.branchname
+            FROM documents d
+            JOIN dup_tags t ON t.retl_details1 = d.retl_details1
+            WHERE d.branchname = %s
+              AND d.curdate >= %s AND d.curdate <= %s
+            ORDER BY d.retl_details1, d.curdate, d.docno
+        """, conn, params=(branch_code, start, end,
+                           branch_code, start, end))
+
+
 def list_assigned_damage_report_numbers(exclude_id: int | None = None) -> set[str]:
     """מחזיר set של כל ה-damage_report_number-ים ששובצו כבר ב-external_repairs.
     כאשר ה-dialog נפתח על שורה X, נעביר exclude_id=X כדי שה-DOCNO המשובץ
