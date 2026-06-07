@@ -618,3 +618,46 @@ def list_recent_external_repairs(limit: int = 30):
 def delete_external_repair(repair_id: int) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM external_repairs WHERE id = %s", (repair_id,))
+
+
+def update_external_repair_damage_report(repair_id: int,
+                                          damage_report_number: str | None) -> None:
+    """משמש את כפתור 'זיהוי' להחזיר את ה-DOCNO שהמשתמש בחר."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE external_repairs SET damage_report_number = %s WHERE id = %s",
+            (damage_report_number, repair_id))
+
+
+def get_internal_repairs_at_branch(branch_code: str, before_date,
+                                    days_back: int = 14):
+    """תיקונים פנימיים (לא החלפות) בסניף, בחלון [before_date - days_back,
+    before_date]. עושה JOIN בין documents ל-logfile, מסנן ל-partname-ים
+    שמופיעים ברשימת ה-SKUs לתיקון.
+
+    Returns a pandas DataFrame עם העמודות:
+        docno, curdate, branchname, partname, topartdes, tquant, ucost, custname
+    Ordered by curdate DESC, docno.
+    """
+    import pandas as pd
+    from datetime import timedelta
+    start = before_date - timedelta(days=days_back)
+    with get_conn() as conn:
+        df = pd.read_sql_query("""
+            SELECT d.docno, d.curdate, d.branchname,
+                   l.partname, l.topartdes, l.tquant, l.ucost,
+                   d.custname
+            FROM documents d
+            JOIN logfile l ON l.logdocno = d.docno
+            WHERE d.branchname = %s
+              AND d.curdate >= %s
+              AND d.curdate <= %s
+              AND l.partname IS NOT NULL
+            ORDER BY d.curdate DESC, d.docno
+        """, conn, params=(branch_code, start, before_date))
+    if df.empty:
+        return df
+    # סינון לתיקונים בלבד — ה-SKU מופיע בטבלאות מחירי-תיקון.
+    repair_skus = set(_cached('repair_skus', _load_repair_skus))
+    mask = df['partname'].astype(str).isin(repair_skus)
+    return df[mask].reset_index(drop=True)
