@@ -6,8 +6,10 @@ from qtpy.QtWidgets import (
 )
 from qtpy.QtCore import Qt
 
-from fetch_combined import fetch_with_cache, combine_data, get_target_customers
-from domain_repository import get_supplier_payment
+from fetch_combined import (
+    fetch_with_cache, combine_data, get_target_customers,
+    fetch_supplier_payments_for_month,
+)
 
 from tabs._base import BaseTabWorker, format_error_for_user
 from tabs._widgets import MonthYearPicker, ExcelExporter, slice_by_column
@@ -122,10 +124,13 @@ class ReportGeneratorTab(QWidget):
         try:
             sheets = slice_by_column(combined, 'מספר לקוח', values=get_target_customers())
 
+            # שלב 'תשלום לספקים' זהה ל-fetch_supplier_payments_for_month, אבל
+            # ה-combined כבר נטען — אז נחשב inline ולא נריץ fetch שני.
             suppliers_data = combined[
                 combined['פרטים'].notna() & (combined['פרטים'] != '')
             ].copy()
             if not suppliers_data.empty:
+                from domain_repository import get_supplier_payment
                 suppliers_data['תשלום לספק'] = suppliers_data.apply(
                     lambda row: get_supplier_payment(
                         row['מקט'], row['זיהוי מזוודה'], row['כמות']),

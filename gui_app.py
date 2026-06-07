@@ -16,6 +16,7 @@ from tabs.unidentified_products_tab import UnidentifiedProductsTab
 from tabs.updates_tab import UpdatesTab
 from tabs.min_stock_tab import MinStockTab
 from tabs.per_cell_planning_tab import PerCellPlanningTab
+from tabs.supplier_tab import SupplierTab
 from forecast_tab import ForecastTab
 
 
@@ -66,6 +67,7 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(ReportGeneratorTab(),       "בקשת נתונים")
+        tabs.addTab(SupplierTab(),               "טיפול בספקים")
         tabs.addTab(AirlineReportTab(),          "דוחות לפי לקוחות")
         tabs.addTab(BranchReportTab(),           "דוחות לפי סניף")
         tabs.addTab(InventoryTab(),              "מעקב מלאי")

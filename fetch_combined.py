@@ -265,3 +265,38 @@ def combine_data(documents, logfile_records):
     combined = combined.drop('מספר לקוח_log', axis=1)
 
     return combined
+
+
+def fetch_supplier_payments_for_month(year_month: str, progress=None) -> pd.DataFrame:
+    """
+    מחזיר את אותה לשונית 'תשלום לספקים' שב-report_tab בונה, עבור חודש בודד.
+    משותף ל-tabs/report_tab.py ול-tabs/supplier_tab.py — נמנע משכפול הלוגיקה.
+
+    Args:
+        year_month: 'YYYY-MM'
+        progress: optional callback(str) להראות התקדמות בעת fetch.
+
+    Returns:
+        DataFrame עם השורות שיש להן ערך ב-'פרטים' (ספק חיצוני), מועשר עם
+        עמודת 'תשלום לספק' המחושבת. ריק אם אין פעולות-ספק בחודש.
+    """
+    y, m = int(year_month[:4]), int(year_month[5:7])
+    last_day = calendar.monthrange(y, m)[1]
+    start, end = f"{y}-{m:02d}-01", f"{y}-{m:02d}-{last_day:02d}"
+
+    documents, logfile = fetch_with_cache(start, end, progress=progress)
+    combined = combine_data(documents, logfile)
+
+    suppliers = combined[
+        combined['פרטים'].notna() & (combined['פרטים'] != '')
+    ].copy()
+    if suppliers.empty:
+        return suppliers
+
+    from domain_repository import get_supplier_payment
+    suppliers['תשלום לספק'] = suppliers.apply(
+        lambda row: get_supplier_payment(
+            row['מקט'], row['זיהוי מזוודה'], row['כמות']),
+        axis=1,
+    )
+    return suppliers
