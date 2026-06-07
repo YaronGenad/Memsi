@@ -36,17 +36,18 @@ class _ExternalEntryForm(QWidget):
     """Form to insert one external_repairs row + table of recent entries."""
 
     HISTORY_COLUMNS = [
-        ('id',           'ID'),
-        ('repair_date',  'תאריך'),
-        ('vendor',       'ספק'),
-        ('sender_name',  'שולח'),
-        ('branch_code',  'סניף'),
-        ('luggage_type', 'גודל מזוודה'),
-        ('part_sku',     'מק"ט'),
-        ('repair_notes', 'הערות'),
-        ('amount_due',   'סכום'),
-        ('created_by',   'נוצר ע"י'),
-        ('created_at',   'נוצר ב'),
+        ('id',                   'ID'),
+        ('repair_date',          'תאריך'),
+        ('vendor',               'ספק'),
+        ('sender_name',          'שולח'),
+        ('branch_code',          'סניף'),
+        ('luggage_type',         'גודל מזוודה'),
+        ('part_sku',             'מק"ט'),
+        ('repair_notes',         'הערות'),
+        ('amount_due',           'סכום'),
+        ('damage_report_number', 'מס\' דוח נזק'),
+        ('created_by',           'נוצר ע"י'),
+        ('created_at',           'נוצר ב'),
     ]
 
     def __init__(self):
@@ -111,21 +112,31 @@ class _ExternalEntryForm(QWidget):
         row2.addStretch()
         fg.addLayout(row2)
 
-        # Row 3: notes, amount, save
+        # Row 3: notes, damage report number
         row3 = QHBoxLayout()
         row3.addWidget(QLabel("הערות לתיקון:"))
-        self.notes = QLineEdit(); self.notes.setMinimumWidth(280)
+        self.notes = QLineEdit(); self.notes.setMinimumWidth(240)
         row3.addWidget(self.notes, 1)
-        row3.addWidget(QLabel("סכום:"))
+        row3.addWidget(QLabel("מס' דוח נזק:"))
+        self.damage_report = QLineEdit()
+        self.damage_report.setMinimumWidth(120)
+        self.damage_report.setPlaceholderText("ידני - לתחקור")
+        row3.addWidget(self.damage_report)
+        fg.addLayout(row3)
+
+        # Row 4: amount + save
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("סכום:"))
         self.amount = QDoubleSpinBox()
         self.amount.setMaximum(99999); self.amount.setDecimals(2)
-        row3.addWidget(self.amount)
+        row4.addWidget(self.amount)
+        row4.addStretch()
         self.save_btn = QPushButton("שמור")
         self.save_btn.setStyleSheet(
             "QPushButton{background:#27ae60;color:white;font-weight:bold;padding:6px 18px;}")
         self.save_btn.clicked.connect(self._save_one)
-        row3.addWidget(self.save_btn)
-        fg.addLayout(row3)
+        row4.addWidget(self.save_btn)
+        fg.addLayout(row4)
 
         form_group.setLayout(fg)
         v.addWidget(form_group)
@@ -213,6 +224,7 @@ class _ExternalEntryForm(QWidget):
         luggage_type = self.luggage.currentText().strip() or None
         part_sku = self.sku.currentText().strip() or None
         notes = self.notes.text().strip() or None
+        damage_report = self.damage_report.text().strip() or None
         amount = float(self.amount.value())
 
         if not vendor:
@@ -226,7 +238,8 @@ class _ExternalEntryForm(QWidget):
             return None
         return dict(repair_date=repair_date, vendor=vendor, sender_name=sender,
                     branch_code=branch_code, luggage_type=luggage_type,
-                    part_sku=part_sku, repair_notes=notes, amount_due=amount)
+                    part_sku=part_sku, repair_notes=notes, amount_due=amount,
+                    damage_report_number=damage_report)
 
     def _save_one(self):
         data = self._read_form()
@@ -248,6 +261,7 @@ class _ExternalEntryForm(QWidget):
     def _clear_form(self):
         self.sender.clear()
         self.notes.clear()
+        self.damage_report.clear()
         self.amount.setValue(0)
 
     # ---- OCR ----

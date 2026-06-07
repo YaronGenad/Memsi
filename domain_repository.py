@@ -561,17 +561,20 @@ def add_luggage_identification(description: str, category: str,
 def insert_external_repair(repair_date, vendor: str, sender_name: str | None,
                             branch_code: str, luggage_type: str | None,
                             part_sku: str | None, repair_notes: str | None,
-                            amount_due: float, user: str | None = None) -> int:
+                            amount_due: float,
+                            damage_report_number: str | None = None,
+                            user: str | None = None) -> int:
     """Inserts one row. Returns the new id."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
             INSERT INTO external_repairs (
                 repair_date, vendor, sender_name, branch_code,
-                luggage_type, part_sku, repair_notes, amount_due, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                luggage_type, part_sku, repair_notes, amount_due,
+                damage_report_number, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (repair_date, vendor, sender_name, branch_code, luggage_type,
-              part_sku, repair_notes, amount_due,
+              part_sku, repair_notes, amount_due, damage_report_number,
               user or get_current_user()))
         return cur.fetchone()[0]
 
@@ -584,7 +587,7 @@ def list_external_repairs(year_month_from: str, year_month_to: str):
         return pd.read_sql_query("""
             SELECT id, repair_date, vendor, sender_name, branch_code,
                    luggage_type, part_sku, repair_notes, amount_due,
-                   year_month, created_by, created_at
+                   damage_report_number, year_month, created_by, created_at
             FROM external_repairs
             WHERE year_month BETWEEN %s AND %s
             ORDER BY repair_date, vendor, branch_code, id
@@ -605,7 +608,7 @@ def list_recent_external_repairs(limit: int = 30):
         return pd.read_sql_query("""
             SELECT id, repair_date, vendor, sender_name, branch_code,
                    luggage_type, part_sku, repair_notes, amount_due,
-                   created_by, created_at
+                   damage_report_number, created_by, created_at
             FROM external_repairs
             ORDER BY created_at DESC
             LIMIT %s
