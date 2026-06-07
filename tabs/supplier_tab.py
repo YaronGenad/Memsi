@@ -575,25 +575,46 @@ class _PickInternalRepairDialog(QDialog):
         ('tquant',    'כמות'),
         ('custname',  'לקוח'),
     ]
-    EXPAND_STEP_DAYS = 14
+    REPAIR_EXPAND_STEP_DAYS = 14
+    REPLACEMENT_EXPAND_STEP_DAYS = 2
 
     def __init__(self, parent, branch_code: str, repair_date,
                  current_repair_id: int | None = None,
                  days_back: int = 14, days_forward: int = 14):
         super().__init__(parent)
         self.setWindowTitle(f"זיהוי תיקון פנימי בסניף {branch_code}")
-        self.resize(960, 550)
+        self.resize(960, 580)
         self._selected_docno: str | None = None
         self._branch_code = branch_code
         self._repair_date = repair_date
         self._current_repair_id = current_repair_id
+
+        # שני chunks של state — אחד לכל mode. כשהמשתמש עובר בין modes
+        # החלון של ה-mode השני נשמר.
+        self._mode = 'repairs'           # 'repairs' | 'replacements'
         self._days_back = days_back
         self._days_forward = days_forward
+        self._repl_days_back = 5
+        self._repl_days_forward = 5
 
         v = QVBoxLayout(self)
 
         self._header = QLabel()
         v.addWidget(self._header)
+
+        # שורת mode-toggle
+        mode_row = QHBoxLayout()
+        self._toggle_btn = QPushButton()  # טקסט נקבע ב-_reload
+        self._toggle_btn.setStyleSheet(
+            "QPushButton{background:#9b59b6;color:white;font-weight:bold;"
+            "padding:6px 14px;}"
+            "QPushButton:hover{background:#8e44ad;}")
+        self._toggle_btn.clicked.connect(self._toggle_mode)
+        mode_row.addWidget(self._toggle_btn)
+        self._mode_hint = QLabel()
+        self._mode_hint.setStyleSheet("color:#7f8c8d;padding:4px 8px;")
+        mode_row.addWidget(self._mode_hint, 1)
+        v.addLayout(mode_row)
 
         # Table — נבנית פעם אחת, מתמלאת ב-_reload.
         self.table = QTableWidget(0, len(self.COLUMNS))
@@ -606,10 +627,7 @@ class _PickInternalRepairDialog(QDialog):
         self.table.doubleClicked.connect(self._accept_pick)
         v.addWidget(self.table, 1)
 
-        self._empty_label = QLabel(
-            "לא נמצאו תיקונים פנימיים בטווח שנבחר.\n"
-            "הרחב חיפוש (קדימה/אחורה), או רענן את הדוח הראשי "
-            "אם המטמון לא כולל את התקופה.")
+        self._empty_label = QLabel()
         self._empty_label.setStyleSheet("color:#7f8c8d;padding:20px;")
         self._empty_label.setAlignment(Qt.AlignCenter)
         self._empty_label.setWordWrap(True)
@@ -617,10 +635,10 @@ class _PickInternalRepairDialog(QDialog):
 
         # Buttons row
         btns = QHBoxLayout()
-        self._expand_back = QPushButton(f"⮜ הרחב {self.EXPAND_STEP_DAYS} אחורה")
+        self._expand_back = QPushButton()
         self._expand_back.clicked.connect(self._do_expand_back)
         btns.addWidget(self._expand_back)
-        self._expand_fwd = QPushButton(f"הרחב {self.EXPAND_STEP_DAYS} קדימה ⮞")
+        self._expand_fwd = QPushButton()
         self._expand_fwd.clicked.connect(self._do_expand_forward)
         btns.addWidget(self._expand_fwd)
         btns.addStretch()
@@ -636,26 +654,72 @@ class _PickInternalRepairDialog(QDialog):
 
         self._reload()
 
-    # ---- window expansion ----
+    # ---- mode toggle ----
+    def _toggle_mode(self):
+        self._mode = 'replacements' if self._mode == 'repairs' else 'repairs'
+        self._reload()
+
+    # ---- window expansion (פר-mode) ----
     def _do_expand_back(self):
-        self._days_back += self.EXPAND_STEP_DAYS
+        step = (self.REPAIR_EXPAND_STEP_DAYS if self._mode == 'repairs'
+                else self.REPLACEMENT_EXPAND_STEP_DAYS)
+        if self._mode == 'repairs':
+            self._days_back += step
+        else:
+            self._repl_days_back += step
         self._reload()
 
     def _do_expand_forward(self):
-        self._days_forward += self.EXPAND_STEP_DAYS
+        step = (self.REPAIR_EXPAND_STEP_DAYS if self._mode == 'repairs'
+                else self.REPLACEMENT_EXPAND_STEP_DAYS)
+        if self._mode == 'repairs':
+            self._days_forward += step
+        else:
+            self._repl_days_forward += step
         self._reload()
 
     # ---- (re)populate the table ----
     def _reload(self):
+        if self._mode == 'repairs':
+            kind_he = 'תיקונים'
+            days_b, days_f = self._days_back, self._days_forward
+            step = self.REPAIR_EXPAND_STEP_DAYS
+            df = repo.get_internal_repairs_at_branch(
+                self._branch_code, self._repair_date,
+                days_back=days_b, days_forward=days_f)
+            self.setWindowTitle(f"זיהוי תיקון פנימי בסניף {self._branch_code}")
+            self._toggle_btn.setText("הצג החלפות במקום")
+            self._mode_hint.setText(
+                "אם הקלידו את הסניף שגוי בדוח הספק, ייתכן שמדובר בהחלפה.")
+            empty_msg = (
+                "לא נמצאו תיקונים פנימיים בטווח שנבחר.\n"
+                "הרחב חיפוש (קדימה/אחורה), נסה את כפתור 'הצג החלפות',\n"
+                "או רענן את הדוח הראשי אם המטמון לא כולל את התקופה.")
+        else:
+            kind_he = 'החלפות'
+            days_b, days_f = self._repl_days_back, self._repl_days_forward
+            step = self.REPLACEMENT_EXPAND_STEP_DAYS
+            df = repo.get_internal_replacements_at_branch(
+                self._branch_code, self._repair_date,
+                days_back=days_b, days_forward=days_f)
+            self.setWindowTitle(
+                f"זיהוי החלפה פנימית בסניף {self._branch_code}")
+            self._toggle_btn.setText("חזור לתיקונים")
+            self._mode_hint.setText(
+                "מציג החלפות בלבד. ייתכן שטעות בהקלדת הסניף בדוח הספק.")
+            empty_msg = (
+                "לא נמצאו החלפות פנימיות בטווח שנבחר.\n"
+                "הרחב חיפוש בקפיצות של 2 ימים, או חזור לתיקונים.")
+
+        self._expand_back.setText(f"⮜ הרחב {step} אחורה")
+        self._expand_fwd.setText(f"הרחב {step} קדימה ⮞")
+        self._empty_label.setText(empty_msg)
+
         self._header.setText(
             f"<b>סניף:</b> {self._branch_code} &nbsp;|&nbsp; "
             f"<b>תאריך ספק:</b> {self._repair_date.strftime('%Y-%m-%d')} &nbsp;|&nbsp; "
-            f"<b>חלון חיפוש:</b> {self._days_back} ימים אחורה, "
-            f"{self._days_forward} ימים קדימה")
-
-        df = repo.get_internal_repairs_at_branch(
-            self._branch_code, self._repair_date,
-            days_back=self._days_back, days_forward=self._days_forward)
+            f"<b>מצב:</b> {kind_he} &nbsp;|&nbsp; "
+            f"<b>חלון:</b> {days_b} ימים אחורה, {days_f} ימים קדימה")
 
         assigned = repo.list_assigned_damage_report_numbers(
             exclude_id=self._current_repair_id)
@@ -678,8 +742,6 @@ class _PickInternalRepairDialog(QDialog):
                         txt = f"{txt}  (משובץ)"
                     item = QTableWidgetItem(txt)
                     if is_taken:
-                        # Gray + non-selectable, non-enabled flags. סטטוס:
-                        # מוצג אבל לא בחיר ולא נכנס ל-selection.
                         item.setForeground(Qt.gray)
                         item.setFlags(item.flags()
                                        & ~Qt.ItemIsSelectable

@@ -667,6 +667,49 @@ def get_internal_repairs_at_branch(branch_code: str, repair_date,
     return df[mask].reset_index(drop=True)
 
 
+def get_internal_replacements_at_branch(branch_code: str, repair_date,
+                                          days_back: int = 5,
+                                          days_forward: int = 5):
+    """החלפות פנימיות בסניף בחלון [repair_date - days_back, repair_date + days_forward].
+
+    שימושי כשהאנליסט לא מצא תיקון תואם — אולי הסניף הוקלד שגוי בדוח-הספק,
+    ולמעשה הייתה החלפה (לא תיקון). חלון ברירת-המחדל קטן יותר (±5 ימים)
+    כי החלפות סוגרות מהר.
+
+    "החלפה" מזוהה לפי שני תנאים: ה-SKU לא מופיע ברשימת SKUs של תיקון,
+    וה-תיאור-מוצר (`topartdes`) מתורגם לקטגוריית מזוודה דרך identify_luggage.
+
+    Returns a pandas DataFrame עם:
+        docno, curdate, branchname, partname, topartdes, tquant, ucost, custname
+    Ordered by curdate ASC, docno.
+    """
+    import pandas as pd
+    from datetime import timedelta
+    start = repair_date - timedelta(days=days_back)
+    end = repair_date + timedelta(days=days_forward)
+    with get_conn() as conn:
+        df = pd.read_sql_query("""
+            SELECT d.docno, d.curdate, d.branchname,
+                   l.partname, l.topartdes, l.tquant, l.ucost,
+                   d.custname
+            FROM documents d
+            JOIN logfile l ON l.logdocno = d.docno
+            WHERE d.branchname = %s
+              AND d.curdate >= %s
+              AND d.curdate <= %s
+              AND l.topartdes IS NOT NULL
+            ORDER BY d.curdate ASC, d.docno
+        """, conn, params=(branch_code, start, end))
+    if df.empty:
+        return df
+    # סנן החלפות: לא תיקון + יש זיהוי-מזוודה לפי תיאור.
+    repair_skus = set(_cached('repair_skus', _load_repair_skus))
+    not_repair = ~df['partname'].astype(str).isin(repair_skus)
+    has_luggage = df['topartdes'].astype(str).map(
+        lambda d: identify_luggage(d) is not None)
+    return df[not_repair & has_luggage].reset_index(drop=True)
+
+
 def list_assigned_damage_report_numbers(exclude_id: int | None = None) -> set[str]:
     """מחזיר set של כל ה-damage_report_number-ים ששובצו כבר ב-external_repairs.
     כאשר ה-dialog נפתח על שורה X, נעביר exclude_id=X כדי שה-DOCNO המשובץ
