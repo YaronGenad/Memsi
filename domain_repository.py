@@ -551,3 +551,67 @@ def add_luggage_identification(description: str, category: str,
                {'category': category}, user)
     invalidate('luggage_categories', 'luggage_by_category', 'luggage_patterns')
     logger.info("add luggage_id: '%s' as %s by=%s", description, category, user)
+
+
+# ────────────────────────────────────────────────
+#  External repairs (Sprint C9) — manual vendor-side repairs
+#  ב-Priority הם לא מתועדים. נכנסים דרך tabs/supplier_tab.py
+#  עם אופציה ל-OCR מטיוטה ידנית.
+# ────────────────────────────────────────────────
+def insert_external_repair(repair_date, vendor: str, sender_name: str | None,
+                            branch_code: str, luggage_type: str | None,
+                            part_sku: str | None, repair_notes: str | None,
+                            amount_due: float, user: str | None = None) -> int:
+    """Inserts one row. Returns the new id."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO external_repairs (
+                repair_date, vendor, sender_name, branch_code,
+                luggage_type, part_sku, repair_notes, amount_due, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (repair_date, vendor, sender_name, branch_code, luggage_type,
+              part_sku, repair_notes, amount_due,
+              user or get_current_user()))
+        return cur.fetchone()[0]
+
+
+def list_external_repairs(year_month_from: str, year_month_to: str):
+    """Returns a pandas DataFrame with all rows in [from..to] inclusive.
+    Empty DataFrame if no rows."""
+    import pandas as pd
+    with get_conn() as conn:
+        return pd.read_sql_query("""
+            SELECT id, repair_date, vendor, sender_name, branch_code,
+                   luggage_type, part_sku, repair_notes, amount_due,
+                   year_month, created_by, created_at
+            FROM external_repairs
+            WHERE year_month BETWEEN %s AND %s
+            ORDER BY repair_date, vendor, branch_code, id
+        """, conn, params=(year_month_from, year_month_to))
+
+
+def list_external_vendors() -> list[str]:
+    """Distinct vendors ever entered. Used to populate the combobox."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT vendor FROM external_repairs ORDER BY vendor")
+        return [r[0] for r in cur.fetchall()]
+
+
+def list_recent_external_repairs(limit: int = 30):
+    """Most-recent N entries — for the entry-form's history table."""
+    import pandas as pd
+    with get_conn() as conn:
+        return pd.read_sql_query("""
+            SELECT id, repair_date, vendor, sender_name, branch_code,
+                   luggage_type, part_sku, repair_notes, amount_due,
+                   created_by, created_at
+            FROM external_repairs
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, conn, params=(limit,))
+
+
+def delete_external_repair(repair_id: int) -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM external_repairs WHERE id = %s", (repair_id,))

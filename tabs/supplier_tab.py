@@ -1,0 +1,509 @@
+# -*- coding: utf-8 -*-
+"""
+tabs/supplier_tab.py — Sprint C9.
+
+לשונית "טיפול בספקים". מכילה שתי תת-לשוניות:
+
+  1. הזנת נתונים — טופס לתיעוד תיקון שביצע ספק חיצוני בסניף (פעולה שלא
+     עברה ב-Priority). אופציית OCR לטיוטה אוטומטית מדוח-ספק ידני מצולם.
+  2. הפקת דוחות — בחירת טווח חודשים, ייצוא Excel עם שתי לשוניות לכל חודש:
+     "פעולות נקודה" (מ-Priority, החלק הקיים) ו"הזנה חיצונית" (החדש מטופס).
+"""
+from __future__ import annotations
+import calendar
+from datetime import date, datetime
+
+from qtpy.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QLineEdit,
+    QComboBox, QPushButton, QDoubleSpinBox, QDateEdit, QTableWidget,
+    QTableWidgetItem, QMessageBox, QTextEdit, QTabWidget, QHeaderView,
+    QFileDialog, QApplication, QDialog,
+)
+from qtpy.QtCore import Qt, QDate
+
+import domain_repository as repo
+from fetch_combined import fetch_supplier_payments_for_month
+from logger import logger
+
+from tabs._base import BaseTabWorker, format_error_for_user
+from tabs._widgets import DateRangePicker, ExcelExporter
+
+
+# ════════════════════════════════════════════════════════════════
+#  Sub-tab #1: הזנת נתונים
+# ════════════════════════════════════════════════════════════════
+class _ExternalEntryForm(QWidget):
+    """Form to insert one external_repairs row + table of recent entries."""
+
+    HISTORY_COLUMNS = [
+        ('id',           'ID'),
+        ('repair_date',  'תאריך'),
+        ('vendor',       'ספק'),
+        ('sender_name',  'שולח'),
+        ('branch_code',  'סניף'),
+        ('luggage_type', 'גודל מזוודה'),
+        ('part_sku',     'מק"ט'),
+        ('repair_notes', 'הערות'),
+        ('amount_due',   'סכום'),
+        ('created_by',   'נוצר ע"י'),
+        ('created_at',   'נוצר ב'),
+    ]
+
+    def __init__(self):
+        super().__init__()
+        v = QVBoxLayout(self); v.setSpacing(10)
+
+        # ── OCR toolbar ──
+        ocr_group = QGroupBox("מילוי-טיוטה אוטומטי מ-OCR")
+        ocr_layout = QHBoxLayout()
+        info = QLabel(
+            "בחר תמונה של דוח ספק ידני; השורות יחזרו לטבלת עריכה ל-תיקון "
+            "וייכנסו לDB אחרי אישור."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color:#7f8c8d;")
+        ocr_layout.addWidget(info, 1)
+        self.ocr_file_btn = QPushButton("📁 סריקה מקובץ")
+        self.ocr_file_btn.clicked.connect(self._ocr_from_file)
+        ocr_layout.addWidget(self.ocr_file_btn)
+        self.ocr_clip_btn = QPushButton("📋 הדבק תמונה")
+        self.ocr_clip_btn.clicked.connect(self._ocr_from_clipboard)
+        ocr_layout.addWidget(self.ocr_clip_btn)
+        ocr_group.setLayout(ocr_layout)
+        v.addWidget(ocr_group)
+
+        # ── Form: single-row entry ──
+        form_group = QGroupBox("הזנה ידנית")
+        fg = QVBoxLayout()
+
+        # Row 1: date, vendor, sender
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("תאריך:"))
+        self.repair_date = QDateEdit(QDate.currentDate())
+        self.repair_date.setCalendarPopup(True)
+        self.repair_date.setDisplayFormat("yyyy-MM-dd")
+        row1.addWidget(self.repair_date)
+        row1.addWidget(QLabel("ספק (משווק):"))
+        self.vendor = QComboBox(); self.vendor.setEditable(True)
+        self.vendor.setMinimumWidth(160)
+        row1.addWidget(self.vendor)
+        row1.addWidget(QLabel("שם השולח:"))
+        self.sender = QLineEdit()
+        self.sender.setMinimumWidth(140)
+        row1.addWidget(self.sender)
+        row1.addStretch()
+        fg.addLayout(row1)
+
+        # Row 2: branch, luggage_type, sku
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("סניף:"))
+        self.branch = QComboBox()
+        self.branch.setMinimumWidth(220)
+        row2.addWidget(self.branch)
+        row2.addWidget(QLabel("גודל מזוודה:"))
+        self.luggage = QComboBox(); self.luggage.setEditable(True)
+        self.luggage.setMinimumWidth(180)
+        row2.addWidget(self.luggage)
+        row2.addWidget(QLabel('מק"ט:'))
+        self.sku = QComboBox(); self.sku.setEditable(True)
+        self.sku.setMinimumWidth(140)
+        row2.addWidget(self.sku)
+        row2.addStretch()
+        fg.addLayout(row2)
+
+        # Row 3: notes, amount, save
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("הערות לתיקון:"))
+        self.notes = QLineEdit(); self.notes.setMinimumWidth(280)
+        row3.addWidget(self.notes, 1)
+        row3.addWidget(QLabel("סכום:"))
+        self.amount = QDoubleSpinBox()
+        self.amount.setMaximum(99999); self.amount.setDecimals(2)
+        row3.addWidget(self.amount)
+        self.save_btn = QPushButton("שמור")
+        self.save_btn.setStyleSheet(
+            "QPushButton{background:#27ae60;color:white;font-weight:bold;padding:6px 18px;}")
+        self.save_btn.clicked.connect(self._save_one)
+        row3.addWidget(self.save_btn)
+        fg.addLayout(row3)
+
+        form_group.setLayout(fg)
+        v.addWidget(form_group)
+
+        # ── History table ──
+        hist_group = QGroupBox("30 ההזנות האחרונות")
+        hg = QVBoxLayout()
+        self.table = QTableWidget(0, len(self.HISTORY_COLUMNS) + 1)
+        headers = [h for _, h in self.HISTORY_COLUMNS] + ['']
+        self.table.setHorizontalHeaderLabels(headers)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents)
+        hg.addWidget(self.table)
+        hist_group.setLayout(hg)
+        v.addWidget(hist_group, 1)
+
+        self._reload_options()
+        self._reload_table()
+
+    # ---- option loaders ----
+    def _reload_options(self):
+        # Vendors: known ones from DB + לאפשר new entry
+        self.vendor.clear()
+        vendors = repo.list_external_vendors()
+        self.vendor.addItems(vendors)
+        self.vendor.setEditText('')
+
+        # Branches: ordered "code – name"
+        self.branch.clear()
+        branches = repo.list_branches()  # dict {code: name}
+        for code, name in sorted(branches.items()):
+            self.branch.addItem(f"{code} – {name}", code)
+
+        # Luggage categories
+        self.luggage.clear()
+        self.luggage.addItems(repo.list_luggage_categories())
+        self.luggage.setEditText('')
+
+        # SKUs
+        self.sku.clear()
+        self.sku.addItems(repo.list_repair_part_skus())
+        self.sku.setEditText('')
+
+    def _reload_table(self):
+        df = repo.list_recent_external_repairs(limit=30)
+        self.table.setRowCount(len(df))
+        for r, (_, row) in enumerate(df.iterrows()):
+            for c, (key, _) in enumerate(self.HISTORY_COLUMNS):
+                val = row[key]
+                if hasattr(val, 'strftime'):
+                    txt = val.strftime('%Y-%m-%d %H:%M') if hasattr(val, 'hour') \
+                          else val.strftime('%Y-%m-%d')
+                elif val is None or (isinstance(val, float) and val != val):
+                    txt = ''
+                else:
+                    txt = str(val)
+                self.table.setItem(r, c, QTableWidgetItem(txt))
+            del_btn = QPushButton("מחק")
+            del_btn.setStyleSheet("color:#c0392b;")
+            del_btn.clicked.connect(
+                lambda _checked, rid=int(row['id']): self._delete_row(rid))
+            self.table.setCellWidget(r, len(self.HISTORY_COLUMNS), del_btn)
+
+    def _delete_row(self, repair_id: int):
+        reply = QMessageBox.question(
+            self, "אישור מחיקה",
+            f"למחוק את הזנה #{repair_id}? לא ניתן לבטל.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            repo.delete_external_repair(repair_id)
+            self._reload_table()
+        except Exception as e:
+            logger.exception("delete_external_repair failed")
+            QMessageBox.critical(self, "שגיאה", f"{type(e).__name__}: {e}")
+
+    # ---- save ----
+    def _read_form(self) -> dict | None:
+        date_qd = self.repair_date.date()
+        repair_date = date(date_qd.year(), date_qd.month(), date_qd.day())
+        vendor = self.vendor.currentText().strip()
+        sender = self.sender.text().strip() or None
+        branch_code = self.branch.currentData()
+        luggage_type = self.luggage.currentText().strip() or None
+        part_sku = self.sku.currentText().strip() or None
+        notes = self.notes.text().strip() or None
+        amount = float(self.amount.value())
+
+        if not vendor:
+            QMessageBox.warning(self, "שגיאה", "ספק הוא שדה חובה.")
+            return None
+        if not branch_code:
+            QMessageBox.warning(self, "שגיאה", "סניף הוא שדה חובה.")
+            return None
+        if amount <= 0:
+            QMessageBox.warning(self, "שגיאה", "סכום חייב להיות גדול מ-0.")
+            return None
+        return dict(repair_date=repair_date, vendor=vendor, sender_name=sender,
+                    branch_code=branch_code, luggage_type=luggage_type,
+                    part_sku=part_sku, repair_notes=notes, amount_due=amount)
+
+    def _save_one(self):
+        data = self._read_form()
+        if not data:
+            return
+        try:
+            new_id = repo.insert_external_repair(**data)
+            self._reload_options()  # vendor combobox may have a new entry
+            self._reload_table()
+            self._clear_form()
+            QMessageBox.information(
+                self, "הצלחה",
+                f"נוצרה הזנה #{new_id}: {data['vendor']} בסניף "
+                f"{data['branch_code']} סכום {data['amount_due']:.2f}")
+        except Exception as e:
+            logger.exception("insert_external_repair failed")
+            QMessageBox.critical(self, "שגיאה", f"{type(e).__name__}: {e}")
+
+    def _clear_form(self):
+        self.sender.clear()
+        self.notes.clear()
+        self.amount.setValue(0)
+
+    # ---- OCR ----
+    def _ocr_from_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "בחר תמונת דוח ספק",
+            "", "תמונות (*.png *.jpg *.jpeg);;כל הקבצים (*)")
+        if not path:
+            return
+        from tabs._supplier_ocr import read_image_file_bytes
+        data, mt = read_image_file_bytes(path)
+        self._run_ocr(data, mt)
+
+    def _ocr_from_clipboard(self):
+        from tabs._supplier_ocr import grab_clipboard_image_bytes
+        data = grab_clipboard_image_bytes()
+        if data is None:
+            QMessageBox.warning(self, "אין תמונה",
+                                "לא נמצאה תמונה ב-clipboard.")
+            return
+        self._run_ocr(data, 'image/png')
+
+    def _run_ocr(self, image_bytes: bytes, media_type: str):
+        from tabs._supplier_ocr import (
+            extract_supplier_report, OcrPreviewDialog,
+        )
+        # Show a wait cursor while the API runs (could take ~5s).
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            drafted = extract_supplier_report(image_bytes, media_type=media_type)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            logger.exception("OCR extract failed")
+            QMessageBox.critical(self, "שגיאת OCR", f"{type(e).__name__}: {e}")
+            return
+        QApplication.restoreOverrideCursor()
+
+        if not drafted:
+            QMessageBox.information(self, "OCR",
+                                     "לא זוהו שורות בתמונה. נסה תמונה אחרת.")
+            return
+
+        dlg = OcrPreviewDialog(self, drafted,
+                                known_vendors=repo.list_external_vendors())
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        rows = dlg.get_rows()
+        # Resolve branch_code from text (the OCR may have a branch name; we map
+        # it to a code via fuzzy match against the known branches list).
+        branches = repo.list_branches()
+        name_to_code = {v: k for k, v in branches.items()}
+        inserted, errors = 0, []
+        for i, r in enumerate(rows):
+            branch_raw = (r.get('branch_code') or '').strip()
+            branch_code = None
+            if branch_raw in branches:
+                branch_code = branch_raw
+            elif branch_raw in name_to_code:
+                branch_code = name_to_code[branch_raw]
+            else:
+                # partial: scan
+                for code, name in branches.items():
+                    if branch_raw and branch_raw in name:
+                        branch_code = code
+                        break
+            if not branch_code:
+                errors.append(f"שורה {i+1}: סניף '{branch_raw}' לא זוהה")
+                continue
+
+            try:
+                rd = r.get('repair_date')
+                if isinstance(rd, str) and rd:
+                    repair_date = datetime.strptime(rd, '%Y-%m-%d').date()
+                else:
+                    errors.append(f"שורה {i+1}: תאריך חסר/שגוי")
+                    continue
+                repo.insert_external_repair(
+                    repair_date=repair_date,
+                    vendor=r['vendor'],
+                    sender_name=None,
+                    branch_code=branch_code,
+                    luggage_type=r.get('luggage_type'),
+                    part_sku=None,
+                    repair_notes=r.get('repair_notes'),
+                    amount_due=float(r.get('amount_due') or 0),
+                )
+                inserted += 1
+            except Exception as e:
+                logger.exception("OCR row insert failed")
+                errors.append(f"שורה {i+1}: {type(e).__name__}: {e}")
+
+        self._reload_options()
+        self._reload_table()
+        msg = f"נשמרו {inserted} שורות."
+        if errors:
+            msg += "\n\nשגיאות:\n" + "\n".join(errors[:10])
+            if len(errors) > 10:
+                msg += f"\n... ועוד {len(errors)-10} שגיאות נוספות"
+        QMessageBox.information(self, "OCR סיים", msg)
+
+
+# ════════════════════════════════════════════════════════════════
+#  Sub-tab #2: הפקת דוחות
+# ════════════════════════════════════════════════════════════════
+class _ReportWorker(BaseTabWorker):
+    def __init__(self, year_months: list[str]):
+        super().__init__()
+        self.year_months = year_months
+
+    def _do(self):
+        priority_by_ym = {}
+        external_df = None
+
+        # Priority data per month (cached by C7)
+        for ym in self.year_months:
+            self.emit_progress(f"שולף נתוני Priority עבור {ym}...")
+            try:
+                priority_by_ym[ym] = fetch_supplier_payments_for_month(
+                    ym, progress=self.emit_progress)
+            except Exception:
+                logger.exception("priority fetch failed for %s", ym)
+                priority_by_ym[ym] = None  # signal failure
+
+        # External entries: one query for the whole range
+        if self.year_months:
+            self.emit_progress("שולף הזנות חיצוניות...")
+            external_df = repo.list_external_repairs(
+                self.year_months[0], self.year_months[-1])
+
+        return priority_by_ym, external_df
+
+
+class _ExternalReportForm(QWidget):
+    def __init__(self):
+        super().__init__()
+        v = QVBoxLayout(self); v.setSpacing(12)
+
+        # Period picker
+        self.range = DateRangePicker("בחירת טווח חודשים")
+        v.addWidget(self.range)
+
+        self.run_btn = QPushButton("הפקת דוח חיצוני (Excel)")
+        self.run_btn.setStyleSheet(
+            "QPushButton{background:#3498db;color:white;font-size:16px;"
+            "font-weight:bold;padding:12px;border-radius:6px;}"
+            "QPushButton:hover{background:#2980b9;}")
+        self.run_btn.clicked.connect(self._generate)
+        v.addWidget(self.run_btn)
+
+        self.status = QTextEdit()
+        self.status.setReadOnly(True)
+        self.status.setStyleSheet(
+            "background:#ecf0f1;font-family:Consolas;font-size:12px;")
+        v.addWidget(self.status, 1)
+
+    def _months_in_range(self, ym_from: str, ym_to: str) -> list[str]:
+        y, m = int(ym_from[:4]), int(ym_from[5:7])
+        y_end, m_end = int(ym_to[:4]), int(ym_to[5:7])
+        out = []
+        while (y, m) <= (y_end, m_end):
+            out.append(f"{y}-{m:02d}")
+            m += 1
+            if m > 12:
+                m = 1; y += 1
+        return out
+
+    def _generate(self):
+        start_date, end_date = self.range.date_range()
+        ym_from = start_date[:7]
+        ym_to = end_date[:7]
+        if ym_from > ym_to:
+            QMessageBox.warning(self, "שגיאה", "טווח לא תקין: 'מ' אחרי 'עד'.")
+            return
+        months = self._months_in_range(ym_from, ym_to)
+        if not months:
+            QMessageBox.warning(self, "שגיאה", "טווח ריק.")
+            return
+
+        self.status.clear()
+        self.status.append(f"מפיק דוח לחודשים: {', '.join(months)}\n")
+        self.run_btn.setEnabled(False)
+
+        self._worker = _ReportWorker(months)
+        self._worker.progress.connect(self.status.append)
+        self._worker.finished.connect(self._on_done)
+        self._worker.error.connect(self._on_error)
+        self._worker.start()
+
+    def _on_done(self, result):
+        priority_by_ym, external_df = result
+        try:
+            sheets = {}
+            total_priority_rows, total_external_rows = 0, 0
+            for ym in sorted(priority_by_ym.keys()):
+                p_df = priority_by_ym[ym]
+                if p_df is not None and not p_df.empty:
+                    sheets[f'{ym} פעולות נקודה'] = p_df
+                    total_priority_rows += len(p_df)
+                if external_df is not None and not external_df.empty:
+                    e_sub = external_df[external_df['year_month'] == ym]
+                    if not e_sub.empty:
+                        sheets[f'{ym} הזנה חיצונית'] = e_sub
+                        total_external_rows += len(e_sub)
+
+            if not sheets:
+                self.status.append("✗ אין נתונים להפקה.")
+                QMessageBox.warning(self, "ריק",
+                                     "לא נמצאו נתונים בטווח שנבחר.")
+                return
+
+            ym_from = sorted(priority_by_ym.keys())[0]
+            ym_to = sorted(priority_by_ym.keys())[-1]
+            fname = (f"external_repairs_{ym_from.replace('-', '')}"
+                     f"_{ym_to.replace('-', '')}.xlsx")
+            saved = ExcelExporter(fname).sheets(sheets).save()
+            self.status.append(
+                f"\n✓ הקובץ נוצר: {saved}\n"
+                f"  לשוניות: {len(sheets)}\n"
+                f"  שורות Priority: {total_priority_rows}\n"
+                f"  שורות הזנה-חיצונית: {total_external_rows}"
+            )
+            QMessageBox.information(self, "הצלחה",
+                                     f"הדוח נוצר: {saved}")
+        except Exception as e:
+            logger.exception("export failed")
+            self.status.append(f"\n✗ שגיאה: {e}")
+            QMessageBox.critical(self, "שגיאה", str(e))
+        finally:
+            self.run_btn.setEnabled(True)
+
+    def _on_error(self, tb: str):
+        self.status.append(f"\n✗ שגיאה:\n{tb[:800]}")
+        QMessageBox.critical(self, "שגיאה", format_error_for_user(tb))
+        self.run_btn.setEnabled(True)
+
+
+# ════════════════════════════════════════════════════════════════
+#  Main SupplierTab — קונטיינר
+# ════════════════════════════════════════════════════════════════
+class SupplierTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        v = QVBoxLayout(self)
+        v.setContentsMargins(8, 8, 8, 8)
+
+        title = QLabel("טיפול בספקים")
+        title.setStyleSheet("font-size:22px;font-weight:bold;color:#2c3e50;")
+        title.setAlignment(Qt.AlignCenter)
+        v.addWidget(title)
+
+        sub = QTabWidget()
+        sub.setStyleSheet(
+            "QTabBar::tab{font-size:13px;padding:6px 14px;}"
+            "QTabBar::tab:selected{font-weight:bold;color:#2980b9;}"
+        )
+        sub.addTab(_ExternalEntryForm(), "הזנת נתונים")
+        sub.addTab(_ExternalReportForm(), "הפקת דוחות")
+        v.addWidget(sub, 1)
