@@ -226,7 +226,8 @@ class _ExternalEntryForm(QWidget):
 
     def _identify_row(self, repair_id: int, branch_code: str, repair_date):
         """פותח dialog לבחירת תיקון פנימי. בבחירה — שומר את ה-DOCNO ל-row."""
-        dlg = _PickInternalRepairDialog(self, branch_code, repair_date)
+        dlg = _PickInternalRepairDialog(self, branch_code, repair_date,
+                                          current_repair_id=repair_id)
         if dlg.exec_() != QDialog.Accepted:
             return
         docno = dlg.get_selected_docno()
@@ -552,11 +553,19 @@ class SupplierTab(QWidget):
 
 
 # ════════════════════════════════════════════════════════════════
-#  Dialog: בחירת תיקון פנימי לזיהוי דוח-נזק (Sprint C9.2)
+#  Dialog: בחירת תיקון פנימי לזיהוי דוח-נזק (Sprint C9.2/C9.3)
 # ════════════════════════════════════════════════════════════════
 class _PickInternalRepairDialog(QDialog):
-    """מציג תיקונים פנימיים מהמטמון לסניף נתון בחלון של 14 ימים אחורה.
-    המשתמש בוחר שורה → ה-DOCNO חוזר ל-_identify_row לעדכון."""
+    """מציג תיקונים פנימיים מהמטמון לסניף נתון בחלון דו-כיווני סביב תאריך-הספק.
+
+    סניפים שונים מריצים בקופה בעיתוי שונה: חלקם לפני שליחת המזוודה
+    לתיקון (DOCNO לפני תאריך-הספק), חלקם רק אחרי החזרה מהמעבדה (DOCNO
+    אחרי תאריך-הספק). לכן ברירת-המחדל היא ±14 יום ויש כפתורים להרחיב
+    את החיפוש לכל כיוון (מוסיפים עוד 14 יום בכל לחיצה).
+
+    DOCNOs ששובצו כבר לתיקון-ספק אחר מוצגים באפור ולא ניתן לבחירה.
+    המשתמש בוחר שורה זמינה → ה-DOCNO חוזר ל-_identify_row לעדכון.
+    """
 
     COLUMNS = [
         ('docno',     "מס' דוח"),
@@ -566,42 +575,97 @@ class _PickInternalRepairDialog(QDialog):
         ('tquant',    'כמות'),
         ('custname',  'לקוח'),
     ]
+    EXPAND_STEP_DAYS = 14
 
     def __init__(self, parent, branch_code: str, repair_date,
-                 days_back: int = 14):
+                 current_repair_id: int | None = None,
+                 days_back: int = 14, days_forward: int = 14):
         super().__init__(parent)
         self.setWindowTitle(f"זיהוי תיקון פנימי בסניף {branch_code}")
-        self.resize(900, 500)
+        self.resize(960, 550)
         self._selected_docno: str | None = None
-        self.table: QTableWidget | None = None
+        self._branch_code = branch_code
+        self._repair_date = repair_date
+        self._current_repair_id = current_repair_id
+        self._days_back = days_back
+        self._days_forward = days_forward
 
         v = QVBoxLayout(self)
 
-        header = QLabel(
-            f"<b>סניף:</b> {branch_code} &nbsp;|&nbsp; "
-            f"<b>תאריך ספק:</b> {repair_date.strftime('%Y-%m-%d')} &nbsp;|&nbsp; "
-            f"<b>חלון חיפוש:</b> {days_back} ימים אחורה")
-        v.addWidget(header)
+        self._header = QLabel()
+        v.addWidget(self._header)
+
+        # Table — נבנית פעם אחת, מתמלאת ב-_reload.
+        self.table = QTableWidget(0, len(self.COLUMNS))
+        self.table.setHorizontalHeaderLabels([h for _, h in self.COLUMNS])
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeToContents)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.doubleClicked.connect(self._accept_pick)
+        v.addWidget(self.table, 1)
+
+        self._empty_label = QLabel(
+            "לא נמצאו תיקונים פנימיים בטווח שנבחר.\n"
+            "הרחב חיפוש (קדימה/אחורה), או רענן את הדוח הראשי "
+            "אם המטמון לא כולל את התקופה.")
+        self._empty_label.setStyleSheet("color:#7f8c8d;padding:20px;")
+        self._empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_label.setWordWrap(True)
+        v.addWidget(self._empty_label)
+
+        # Buttons row
+        btns = QHBoxLayout()
+        self._expand_back = QPushButton(f"⮜ הרחב {self.EXPAND_STEP_DAYS} אחורה")
+        self._expand_back.clicked.connect(self._do_expand_back)
+        btns.addWidget(self._expand_back)
+        self._expand_fwd = QPushButton(f"הרחב {self.EXPAND_STEP_DAYS} קדימה ⮞")
+        self._expand_fwd.clicked.connect(self._do_expand_forward)
+        btns.addWidget(self._expand_fwd)
+        btns.addStretch()
+        cancel = QPushButton("ביטול")
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(cancel)
+        self._pick_btn = QPushButton("בחר")
+        self._pick_btn.setStyleSheet(
+            "QPushButton{background:#3498db;color:white;font-weight:bold;padding:6px 18px;}")
+        self._pick_btn.clicked.connect(self._accept_pick)
+        btns.addWidget(self._pick_btn)
+        v.addLayout(btns)
+
+        self._reload()
+
+    # ---- window expansion ----
+    def _do_expand_back(self):
+        self._days_back += self.EXPAND_STEP_DAYS
+        self._reload()
+
+    def _do_expand_forward(self):
+        self._days_forward += self.EXPAND_STEP_DAYS
+        self._reload()
+
+    # ---- (re)populate the table ----
+    def _reload(self):
+        self._header.setText(
+            f"<b>סניף:</b> {self._branch_code} &nbsp;|&nbsp; "
+            f"<b>תאריך ספק:</b> {self._repair_date.strftime('%Y-%m-%d')} &nbsp;|&nbsp; "
+            f"<b>חלון חיפוש:</b> {self._days_back} ימים אחורה, "
+            f"{self._days_forward} ימים קדימה")
 
         df = repo.get_internal_repairs_at_branch(
-            branch_code, repair_date, days_back=days_back)
+            self._branch_code, self._repair_date,
+            days_back=self._days_back, days_forward=self._days_forward)
 
-        if df.empty:
-            empty = QLabel("לא נמצאו תיקונים פנימיים בטווח שנבחר.\n"
-                            "ייתכן שהמטמון לא כולל את התקופה — נסה לרענן "
-                            "את הדוח הראשי לחודש הרלוונטי.")
-            empty.setStyleSheet("color:#7f8c8d;padding:20px;")
-            empty.setAlignment(Qt.AlignCenter)
-            v.addWidget(empty, 1)
-        else:
-            self.table = QTableWidget(len(df), len(self.COLUMNS))
-            self.table.setHorizontalHeaderLabels([h for _, h in self.COLUMNS])
-            self.table.horizontalHeader().setSectionResizeMode(
-                QHeaderView.ResizeToContents)
-            self.table.setSelectionBehavior(QTableWidget.SelectRows)
-            self.table.setSelectionMode(QTableWidget.SingleSelection)
-            self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        assigned = repo.list_assigned_damage_report_numbers(
+            exclude_id=self._current_repair_id)
+
+        self.table.setRowCount(len(df))
+        self.table.setUpdatesEnabled(False)
+        try:
             for r, (_, row) in enumerate(df.iterrows()):
+                docno = str(row['docno'])
+                is_taken = docno in assigned
                 for c, (key, _) in enumerate(self.COLUMNS):
                     val = row[key]
                     if hasattr(val, 'strftime'):
@@ -610,31 +674,46 @@ class _PickInternalRepairDialog(QDialog):
                         txt = ''
                     else:
                         txt = str(val)
-                    self.table.setItem(r, c, QTableWidgetItem(txt))
-            self.table.doubleClicked.connect(self._accept_pick)
-            v.addWidget(self.table, 1)
+                    if is_taken and c == 0:
+                        txt = f"{txt}  (משובץ)"
+                    item = QTableWidgetItem(txt)
+                    if is_taken:
+                        # Gray + non-selectable, non-enabled flags. סטטוס:
+                        # מוצג אבל לא בחיר ולא נכנס ל-selection.
+                        item.setForeground(Qt.gray)
+                        item.setFlags(item.flags()
+                                       & ~Qt.ItemIsSelectable
+                                       & ~Qt.ItemIsEnabled)
+                    self.table.setItem(r, c, item)
+        finally:
+            self.table.setUpdatesEnabled(True)
 
-        btns = QHBoxLayout()
-        btns.addStretch()
-        cancel = QPushButton("ביטול")
-        cancel.clicked.connect(self.reject)
-        btns.addWidget(cancel)
-        if self.table is not None:
-            pick = QPushButton("בחר")
-            pick.setStyleSheet(
-                "QPushButton{background:#3498db;color:white;font-weight:bold;padding:6px 18px;}")
-            pick.clicked.connect(self._accept_pick)
-            btns.addWidget(pick)
-        v.addLayout(btns)
+        n_available = sum(
+            1 for r in range(self.table.rowCount())
+            if self.table.item(r, 0)
+            and (self.table.item(r, 0).flags() & Qt.ItemIsSelectable))
+        has_rows = len(df) > 0
+        self.table.setVisible(has_rows)
+        self._empty_label.setVisible(not has_rows)
+        self._pick_btn.setEnabled(n_available > 0)
 
     def _accept_pick(self):
-        if self.table is None:
-            return
         rows = sorted({i.row() for i in self.table.selectedIndexes()})
         if not rows:
-            QMessageBox.warning(self, "בחר", "בחר שורה מהטבלה.")
+            QMessageBox.warning(self, "בחר", "בחר שורה זמינה מהטבלה "
+                                              "(שורות באפור משובצות כבר).")
             return
-        self._selected_docno = self.table.item(rows[0], 0).text()
+        # Defence: בכל זאת לבדוק שלא נבחר משובץ (Selection-flags כבר מונעות,
+        # אבל בטוח להתעקש).
+        item = self.table.item(rows[0], 0)
+        if item is None or not (item.flags() & Qt.ItemIsSelectable):
+            QMessageBox.warning(self, "משובץ", "ה-DOCNO הזה כבר שובץ "
+                                                 "לתיקון אחר.")
+            return
+        # הסר את הסיומת "  (משובץ)" אם הוצגה (כאן לא תהיה כי השורה זמינה,
+        # אבל בטוח לחתוך).
+        docno = item.text().split('  ')[0].strip()
+        self._selected_docno = docno
         self.accept()
 
     def get_selected_docno(self) -> str | None:
